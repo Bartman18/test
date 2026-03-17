@@ -1,0 +1,3 @@
+# boto3 is pre-installed in the Lambda Python 3.11 runtime
+# No additional dependencies needed for this function
+boto3>=1.34.0

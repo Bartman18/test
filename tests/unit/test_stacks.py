@@ -235,8 +235,8 @@ class TestLambdaStack:
         self.template = assertions.Template.from_stack(stack)
 
     def test_three_lambda_functions_created(self):
-        """Exactly 3 Lambda functions are created."""
-        self.template.resource_count_is("AWS::Lambda::Function", 3)
+        """3 business Lambda functions + 1 CDK LogRetention helper = 4 total."""
+        self.template.resource_count_is("AWS::Lambda::Function", 4)
 
     def test_all_functions_use_python311(self):
         """All Lambda functions use Python 3.11 runtime."""

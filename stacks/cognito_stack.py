@@ -43,6 +43,7 @@ class CognitoStack(Stack):
                 user_srp=True,
             ),
             prevent_user_existence_errors=True,
+            generate_secret=False,  # SPAs cannot keep secrets; required for Amplify
         )
 
         # ── Outputs for Amplify front-end configuration ──────────────────────

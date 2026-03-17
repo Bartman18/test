@@ -69,11 +69,19 @@ feedback-app/
 │       └── requirements.txt
 │
 ├── tests/
+│   ├── conftest.py                 # Sets AWS_DEFAULT_REGION before any import (NoRegionError fix)
 │   ├── unit/
+│   │   ├── conftest.py             # Isolates handler module per test file (cache collision fix)
 │   │   ├── test_post_feedback.py
 │   │   ├── test_process_feedback.py
 │   │   └── test_get_recommendation.py
 │   └── integration/
+│
+├── .github/
+│   ├── workflows/
+│   │   ├── deploy.yml              # CI/CD: test → cdk diff → cdk deploy (push to main)
+│   │   └── destroy.yml             # Teardown: manual dispatch, confirmation gate
+│   └── agents/                     # Agent specialist role documents
 │
 └── front-end/                      # Amplify React app (separate from CDK)
     ├── src/
@@ -92,107 +100,138 @@ feedback-app/
 ## Phase-by-Phase Implementation Plan
 
 ### Phase 1 — CDK Project Bootstrap
-- [ ] Create Python CDK project (`cdk init app --language python`)
-- [ ] Set up virtual environment and install dependencies
-- [ ] Configure `cdk.json` and `app.py` to load all stacks
+- [x] Create Python CDK project (`cdk init app --language python`)
+- [x] Set up virtual environment and install dependencies
+- [x] Configure `cdk.json` and `app.py` to load all stacks
 
 ### Phase 2 — Cognito Stack (`cognito_stack.py`)
-- [ ] Create Cognito **User Pool** with email sign-up/sign-in
-- [ ] Create **App Client** (no client secret — for Amplify SPA use)
-- [ ] Enable self-service sign-up with email verification
-- [ ] Export `user_pool_id` and `app_client_id` as CDK outputs (consumed by `api_stack` and Amplify config)
+- [x] Create Cognito **User Pool** with email sign-up/sign-in
+- [x] Create **App Client** (no client secret — for Amplify SPA use)
+- [x] Enable self-service sign-up with email verification
+- [x] Export `user_pool_id` and `app_client_id` as CDK outputs — `CfnOutput: FeedbackUserPoolId`, `FeedbackUserPoolClientId`
 
 ### Phase 3 — DynamoDB Stack (`database_stack.py`)
-- [ ] Create `Recommendations` table
+- [x] Create `Recommendations` table
   - **Partition key**: `user_id` (String) — Cognito `sub` claim
   - **Sort key**: `feedback_id` (String) — UUID generated on POST
-- [ ] Enable **TTL** attribute (optional, for auto-cleanup)
-- [ ] Export table name/ARN for Lambda IAM grants
+- [x] Enable **TTL** attribute (`ttl` — Unix epoch seconds; items auto-expire when `ttl < now`)
+- [x] Export table name/ARN for Lambda IAM grants (`table.grant_read_write_data`)
 
 ### Phase 4 — Messaging Stack (`messaging_stack.py`)
-- [ ] Create **SNS Topic**: `FeedbackTopic`
-- [ ] Create **SQS Queue**: `FeedbackQueue`
-  - Configure visibility timeout (≥ Lambda timeout × 6, e.g. 360s)
-  - Enable a **Dead Letter Queue (DLQ)** after 3 receive attempts
-- [ ] Subscribe `FeedbackQueue` to `FeedbackTopic`
-- [ ] Grant SNS the permission to send messages to SQS
+- [x] Create **SNS Topic**: `FeedbackTopic`
+- [x] Create **SQS Queue**: `FeedbackQueue`
+  - Visibility timeout = 360s (≥ Lambda #2 timeout 300s × 6)
+  - Dead Letter Queue (DLQ) after 3 receive attempts, retention 14 days
+- [x] Subscribe `FeedbackQueue` to `FeedbackTopic`
+- [x] Grant SNS the permission to send messages to SQS
 
 ### Phase 5 — Lambda Stack (`lambda_stack.py`)
 
-#### Lambda #1 — `PostFeedbackFunction`
+#### Lambda #1 — `PostFeedbackFunction` ✅
 - **Trigger**: API Gateway (POST /feedback)
 - **Responsibilities**:
   1. Extract `user_id` from `event['requestContext']['authorizer']['claims']['sub']`
   2. Generate a `feedback_id` (UUID)
   3. Publish `{ user_id, feedback_id, feedback_text }` to SNS
   4. Return HTTP **202 Accepted** with `{ feedback_id }`
-- **IAM**: `sns:Publish` on `FeedbackTopic`
+- **IAM**: `sns:Publish` on `FeedbackTopic` (via `topic.grant_publish`)
 
-#### Lambda #2 — `ProcessFeedbackFunction`
-- **Trigger**: SQS Event Source Mapping from `FeedbackQueue`
+#### Lambda #2 — `ProcessFeedbackFunction` ✅
+- **Trigger**: SQS Event Source Mapping from `FeedbackQueue` (batch_size=1)
 - **Responsibilities**:
   1. Parse the SNS-wrapped SQS message body
   2. Call **Amazon Bedrock** (`bedrock-runtime:InvokeModel`) with feedback text
   3. Parse model response (recommendation text)
   4. Write `{ user_id, feedback_id, recommendation, timestamp }` to DynamoDB
-- **IAM**: `sqs:ReceiveMessage / DeleteMessage / GetQueueAttributes`, `bedrock:InvokeModel`, `dynamodb:PutItem`
+- **IAM**: `dynamodb:ReadWriteData` (via `table.grant_read_write_data`), `bedrock:InvokeModel` (PolicyStatement scoped to model ARN)
 - **Environment Variables**: `TABLE_NAME`, `BEDROCK_MODEL_ID`
 
-#### Lambda #3 — `GetRecommendationFunction`
+#### Lambda #3 — `GetRecommendationFunction` ✅
 - **Trigger**: API Gateway (GET /recommendation)
 - **Responsibilities**:
   1. Extract `user_id` from authorizer context
   2. Optionally accept `feedback_id` as query string parameter
   3. Query DynamoDB for recommendations belonging to that user
   4. Return HTTP **200** with recommendation items (or 404 if none found)
-- **IAM**: `dynamodb:Query` on `RecommendationsTable`
+- **IAM**: `dynamodb:ReadData` (via `table.grant_read_data`)
 
 ### Phase 6 — API Gateway Stack (`api_stack.py`)
-- [ ] Create **REST API** in API Gateway
-- [ ] Create **Cognito User Pool Authorizer** attached to the User Pool
-- [ ] Define resources and methods:
+- [x] Create **REST API** in API Gateway (`FeedbackService`, stage: `prod`)
+- [x] Create **Cognito User Pool Authorizer** attached to the User Pool
+- [x] Define resources and methods:
   - `POST /feedback` → Lambda #1 integration, Authorizer required
   - `GET /recommendation` → Lambda #3 integration, Authorizer required
-- [ ] Enable **CORS** on both endpoints (for Amplify front-end)
-- [ ] Deploy to a stage (e.g., `prod`)
-- [ ] Export API URL as CDK output
+- [x] Enable **CORS** on both endpoints (for Amplify front-end)
+- [x] Deploy to stage `prod` with X-Ray tracing enabled
+- [x] Export API URL as CDK outputs:
+  - `CfnOutput: FeedbackApiUrl` — base URL (e.g. `https://<id>.execute-api.<region>.amazonaws.com/prod/`)
+  - `CfnOutput: PostFeedbackEndpoint` — `{ApiUrl}feedback`
+  - `CfnOutput: GetRecommendationEndpoint` — `{ApiUrl}recommendation`
 
-### Phase 7 — Front-End (Amplify + React)
+> ⚠️ **After deployment**: copy `FeedbackApiUrl` from CloudFormation outputs and set it in `front-end/src/aws-exports.js` as the `API.endpoint` value for Amplify.
+
+### Phase 7 — Front-End (Amplify + React) ⏳ NOT STARTED
 - [ ] Initialize React app (`npx create-react-app front-end`)
 - [ ] Install Amplify libraries (`@aws-amplify/ui-react`, `aws-amplify`)
-- [ ] Configure `Amplify.configure()` with Cognito and API Gateway outputs
+- [ ] Configure `Amplify.configure()` in `src/index.js` using CDK outputs:
+  ```js
+  Auth: { userPoolId: "<FeedbackUserPoolId>", userPoolWebClientId: "<FeedbackUserPoolClientId>" },
+  API:  { endpoint: "<FeedbackApiUrl>" }
+  ```
 - [ ] Build components:
   - `<Authenticator />` from Amplify UI for login/register
-  - `FeedbackForm` — calls `POST /feedback`, shows `feedback_id` confirmation
+  - `FeedbackForm` — calls `POST /feedback`, shows `feedback_id` confirmation, polls for result
   - `Recommendation` — calls `GET /recommendation`, displays AI suggestion
 - [ ] Deploy via Amplify Console (connect to Git repo)
 
-### Phase 8 — Amazon Bedrock Integration (inside Lambda #2)
-- [ ] Choose a foundation model (e.g., `amazon.titan-text-express-v1` or `anthropic.claude-3-haiku-20240307-v1:0`)
-- [ ] Construct the prompt:
-  ```
-  You are a professional career coach. A person received the following feedback from their manager:
-  "{feedback_text}"
-  Please provide:
-  1. Key areas for improvement
-  2. Specific actionable steps
-  3. Relevant training or certifications to consider
-  ```
-- [ ] Parse the JSON response body from Bedrock
-- [ ] Handle Bedrock throttling with Lambda retry (via SQS DLQ)
-- [ ] Ensure Lambda execution role has `bedrock:InvokeModel` permission and Bedrock model access is enabled in the AWS Console
+### Phase 8 — Amazon Bedrock Integration (inside Lambda #2) ✅
+- [x] Model: `amazon.titan-text-express-v1` (set via `BEDROCK_MODEL_ID` env var)
+- [x] Construct career-coach prompt with `feedback_text` injected
+- [x] Parse `result["results"][0]["outputText"]` from Titan response
+- [x] Handle Bedrock throttling — exceptions re-raise to trigger SQS retry → DLQ after 3 attempts
+- [x] IAM `bedrock:InvokeModel` granted via `PolicyStatement` scoped to:
+  `arn:aws:bedrock:{region}::foundation-model/amazon.titan-text-express-v1`
+
+> 🔴 **MANUAL STEP REQUIRED — will fail silently without this:**
+> Go to **AWS Console → Amazon Bedrock → Model access** and request/enable access to
+> `Amazon Titan Text Express`. CDK cannot automate this step.
+> If you change `BEDROCK_MODEL_ID` to a different model (e.g. Claude), you must also update
+> the IAM resource ARN in `stacks/lambda_stack.py` to match the new model ID.
 
 ### Phase 9 — Testing
-- [ ] Unit tests for each Lambda handler (mock boto3 clients with `moto` or `unittest.mock`)
-- [ ] CDK snapshot tests for each stack
-- [ ] Integration tests against deployed environment
+- [x] Unit tests for each Lambda handler using `unittest.mock` (`@patch`)
+  - `test_post_feedback.py` — 6 tests (202, 400×3, 500, SNS failure)
+  - `test_process_feedback.py` — 4 tests (happy path, malformed body, Bedrock failure, DynamoDB failure)
+  - `test_get_recommendation.py` — 7 tests (200×2, 404×2, 500×3)
+- [x] `tests/conftest.py` — sets `AWS_DEFAULT_REGION` at import time (fixes `NoRegionError`)
+- [x] `tests/unit/conftest.py` — isolates `handler` module per test file (fixes module cache collision)
+- [x] CDK stack assertion tests — `tests/unit/test_stacks.py` (CognitoStack, DatabaseStack, MessagingStack, LambdaStack, ApiStack)
+- [x] Integration tests — `tests/integration/test_e2e.py` (skipped when env vars not set; polls async recommendation flow)
 
 ### Phase 10 — Deployment
-- [ ] `cdk bootstrap` (first time only)
+- [x] `cdk bootstrap aws://<account>/<region>` (first time only)
+  > ⚠️ If bootstrap fails with `UPDATE_ROLLBACK_FAILED`, delete the `CDKToolkit` stack in CloudFormation console and re-run.
 - [ ] `cdk synth` — verify CloudFormation template
-- [ ] `cdk deploy --all` — deploy all stacks
-- [ ] Configure Amplify front-end with CDK output values
+- [ ] `cdk deploy --all` — deploy all stacks in order
+- [ ] Copy CDK outputs (`FeedbackApiUrl`, `FeedbackUserPoolId`, `FeedbackUserPoolClientId`) into front-end config
+- [ ] Enable Bedrock model access in AWS Console (see Phase 8 manual step)
 - [ ] Test end-to-end flow
+
+### Phase 11 — CI/CD (GitHub Actions) ✅
+- [x] `.github/workflows/deploy.yml` — triggered on push to `main`:
+  1. `test` job: runs `pytest --cov` — must pass before any infra change
+  2. `cdk-diff` job: runs `cdk synth` + `cdk diff --all` — shows what will change
+  3. `deploy` job: bootstraps CDK, deploys each stack in dependency order
+- [x] `.github/workflows/destroy.yml` — triggered manually (`workflow_dispatch`):
+  - Requires typing `"destroy"` as confirmation input (safety gate)
+  - Destroys stacks in reverse order: `Api → Lambda → Messaging → Database → Cognito`
+- [x] Required GitHub Secrets:
+  | Secret | Value |
+  |---|---|
+  | `AWS_ACCESS_KEY_ID` | IAM user access key |
+  | `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
+  | `AWS_REGION` | e.g. `eu-central-1` |
+  | `AWS_ACCOUNT_ID` | 12-digit AWS account ID |
 
 ---
 
@@ -242,7 +281,11 @@ LambdaStack + CognitoStack + MessagingStack
 ```
 aws-cdk-lib>=2.100.0
 constructs>=10.0.0
-boto3
+boto3>=1.34.0
+pytest>=7.4.0
+pytest-cov>=4.1.0
+moto[sns,sqs,dynamodb]>=4.2.0
+requests>=2.31.0
 ```
 
 Lambda layers or per-function requirements: only `boto3` (already available in Lambda runtime).

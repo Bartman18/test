@@ -1,0 +1,27 @@
+# Amplify Console build specification
+# Place this file at the repository root.
+# In Amplify Console → App settings → Build settings, point App root to: front-end
+#
+# Required environment variables (set in Amplify Console → Environment variables):
+#   REACT_APP_USER_POOL_ID        → from CDK output: CognitoStack > UserPoolId
+#   REACT_APP_USER_POOL_CLIENT_ID → from CDK output: CognitoStack > UserPoolClientId
+#   REACT_APP_API_URL             → from CDK output: ApiStack > ApiUrl  (no trailing slash)
+
+version: 1
+applications:
+  - appRoot: front-end
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: build
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*

@@ -59,19 +59,20 @@ class ApiStack(Stack):
         self,
         user_pool: cognito.UserPool,
         post_feedback_fn: aws_lambda.Function,
-        get_recommendation_fn: aws_lambda.Function,
     ) -> None:
-        """Wire the Cognito authorizer and Lambda routes into the REST API.
+        """Wire the Cognito authorizer and POST /feedback route into the REST API.
 
-        Called after both CognitoStack and LambdaStack have been instantiated so
-        that app.py reads in natural dependency order:
-          1. API Gateway  (ApiStack.__init__)
-          2. Cognito pool (CognitoStack)
-          3. Authorizer   (configure — attaches Cognito to the API)
+        Architecture — two branches from API Gateway (matches diagram):
+          Branch 1 — Authorizer: API Gateway → Authorizer → Cognito (JWT validation)
+          Branch 2 — Compute:    API Gateway → Lambda #1  → SNS → SQS → Lambda #2
+                                                           → Bedrock → DynamoDB
+
+        The READ path is NOT through API Gateway. Amplify reads recommendations
+        directly from DynamoDB using Cognito Identity Pool credentials.
         """
-        # ── Cognito Authorizer ───────────────────────────────────────────────
-        # Attached to the already-created API Gateway; validates every JWT
-        # against the Cognito User Pool supplied here.
+        # ── Branch 1: Cognito Authorizer ─────────────────────────────────────
+        # Validates every JWT against the Cognito User Pool before any Lambda
+        # is invoked. This is the auth branch shown in the architecture diagram.
         authorizer = apigw.CognitoUserPoolsAuthorizer(
             self,
             "CognitoAuthorizer",
@@ -80,7 +81,10 @@ class ApiStack(Stack):
             identity_source="method.request.header.Authorization",
         )
 
-        # ── POST /feedback ───────────────────────────────────────────────────
+        # ── Branch 2: POST /feedback ─────────────────────────────────────────
+        # Triggers the async processing pipeline:
+        # Lambda #1 → SNS → SQS → Lambda #2 → Bedrock → DynamoDB
+        # Returns 202 Accepted immediately — processing continues asynchronously.
         feedback_resource = self.api.root.add_resource("feedback")
         feedback_resource.add_method(
             "POST",
@@ -93,26 +97,6 @@ class ApiStack(Stack):
             method_responses=[
                 apigw.MethodResponse(status_code="202"),
                 apigw.MethodResponse(status_code="400"),
-                apigw.MethodResponse(status_code="500"),
-            ],
-        )
-
-        # ── GET /recommendation ──────────────────────────────────────────────
-        recommendation_resource = self.api.root.add_resource("recommendation")
-        recommendation_resource.add_method(
-            "GET",
-            apigw.LambdaIntegration(
-                get_recommendation_fn,
-                proxy=True,
-            ),
-            authorizer=authorizer,
-            authorization_type=apigw.AuthorizationType.COGNITO,
-            request_parameters={
-                "method.request.querystring.feedback_id": False,  # optional param
-            },
-            method_responses=[
-                apigw.MethodResponse(status_code="200"),
-                apigw.MethodResponse(status_code="404"),
                 apigw.MethodResponse(status_code="500"),
             ],
         )
@@ -130,10 +114,4 @@ class ApiStack(Stack):
             "PostFeedbackEndpoint",
             value=f"{self.api.url}feedback",
             description="POST /feedback endpoint",
-        )
-        CfnOutput(
-            self,
-            "GetRecommendationEndpoint",
-            value=f"{self.api.url}recommendation",
-            description="GET /recommendation endpoint",
         )

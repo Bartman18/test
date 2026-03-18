@@ -38,9 +38,10 @@ def _all_stacks(app: cdk.App):
 
     Order reflects the diagram:
       1. API Gateway  — public entry-point (ApiStack.__init__)
-      2. Cognito      — user pool that backs the authorizer
+      2. Cognito      — User Pool (authorizer) + Identity Pool (direct DynamoDB reads)
       3. Back-end     — DynamoDB, SNS/SQS, Lambda functions
-      4. configure()  — attaches Cognito authorizer + routes to the API Gateway
+      4. configure()        — POST /feedback route + Cognito authorizer
+      5. configure_grants() — DynamoDB read grant for Identity Pool
     """
     # 1. API Gateway first
     api = ApiStack(app, "ApiStack")
@@ -59,12 +60,14 @@ def _all_stacks(app: cdk.App):
         queue=messaging.queue,
     )
 
-    # 4. Connect Cognito authorizer + Lambda routes to the API Gateway
+    # 4. Connect Cognito authorizer + POST /feedback route to API Gateway
     api.configure(
         user_pool=cognito.user_pool,
         post_feedback_fn=lambdas.post_feedback_fn,
-        get_recommendation_fn=lambdas.get_recommendation_fn,
     )
+
+    # 5. Grant Identity Pool authenticated role read-only access to DynamoDB
+    cognito.configure_grants(table=database.table)
 
     return cognito, database, messaging, lambdas, api
 
@@ -249,8 +252,12 @@ class TestLambdaStack:
         self.template = assertions.Template.from_stack(stack)
 
     def test_three_lambda_functions_created(self):
-        """3 business Lambda functions + 1 CDK LogRetention helper = 4 total."""
-        self.template.resource_count_is("AWS::Lambda::Function", 4)
+        """2 business Lambda functions + 1 CDK LogRetention helper = 3 total.
+
+        GetRecommendationFunction (Lambda #3) is removed — Amplify reads
+        DynamoDB directly via Identity Pool credentials.
+        """
+        self.template.resource_count_is("AWS::Lambda::Function", 3)
 
     def test_all_functions_use_python311(self):
         """All Lambda functions use Python 3.11 runtime."""
@@ -281,16 +288,6 @@ class TestLambdaStack:
                 "Variables": assertions.Match.object_like({
                     "TABLE_NAME": assertions.Match.any_value(),
                     "BEDROCK_MODEL_ID": "amazon.titan-text-express-v1",
-                })
-            }
-        })
-
-    def test_get_recommendation_env_vars(self):
-        """GetRecommendationFunction has TABLE_NAME environment variable."""
-        self.template.has_resource_properties("AWS::Lambda::Function", {
-            "Environment": {
-                "Variables": assertions.Match.object_like({
-                    "TABLE_NAME": assertions.Match.any_value(),
                 })
             }
         })

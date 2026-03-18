@@ -12,7 +12,7 @@ app = cdk.App()
 # ── 1. API Gateway — the public entry-point for all client requests ──────────
 api_stack = ApiStack(app, "ApiStack")
 
-# ── 2. Cognito — user pool that backs the API Gateway authorizer ─────────────
+# ── 2. Cognito — User Pool (API authorizer) + Identity Pool (direct DynamoDB reads)
 cognito_stack = CognitoStack(app, "CognitoStack")
 
 # ── 3. Remaining back-end infrastructure ────────────────────────────────────
@@ -28,11 +28,17 @@ lambda_stack = LambdaStack(
     queue=messaging_stack.queue,
 )
 
-# ── 4. Connect Cognito authorizer + Lambda routes to the API Gateway ─────────
+# ── 4. Branch 1+2: Cognito authorizer + POST /feedback route → async pipeline
+#       API Gateway → Authorizer → Cognito        (Branch 1 — auth)
+#       API Gateway → Lambda #1 → SNS → SQS → Lambda #2 → Bedrock → DynamoDB
+#                                              (Branch 2 — compute)
 api_stack.configure(
     user_pool=cognito_stack.user_pool,
     post_feedback_fn=lambda_stack.post_feedback_fn,
-    get_recommendation_fn=lambda_stack.get_recommendation_fn,
 )
+
+# ── 5. Read path: grant Identity Pool authenticated role read-only DynamoDB access
+#       Amplify reads recommendations directly from DynamoDB (no API Gateway)
+cognito_stack.configure_grants(table=database_stack.table)
 
 app.synth()

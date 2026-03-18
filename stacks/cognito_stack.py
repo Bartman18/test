@@ -4,6 +4,7 @@ from aws_cdk import (
     RemovalPolicy,
     CfnOutput,
     aws_cognito as cognito,
+    aws_iam as iam,
 )
 from constructs import Construct
 
@@ -61,3 +62,69 @@ class CognitoStack(Stack):
             description="Cognito App Client ID",
             export_name="FeedbackUserPoolClientId",
         )
+
+        # ── Cognito Identity Pool ─────────────────────────────────────────────
+        # Allows authenticated Cognito users to obtain temporary AWS credentials
+        # so that Amplify (front-end) can query DynamoDB directly — no Lambda or
+        # API Gateway needed for the read path (matches architecture diagram).
+        self.identity_pool = cognito.CfnIdentityPool(
+            self,
+            "FeedbackIdentityPool",
+            allow_unauthenticated_identities=False,
+            cognito_identity_providers=[
+                cognito.CfnIdentityPool.CognitoIdentityProviderProperty(
+                    client_id=self.app_client.user_pool_client_id,
+                    provider_name=self.user_pool.user_pool_provider_name,
+                )
+            ],
+        )
+
+        # IAM role assumed by authenticated Identity Pool users
+        self.authenticated_role = iam.Role(
+            self,
+            "IdentityPoolAuthenticatedRole",
+            assumed_by=iam.FederatedPrincipal(
+                "cognito-identity.amazonaws.com",
+                conditions={
+                    "StringEquals": {
+                        "cognito-identity.amazonaws.com:aud": self.identity_pool.ref,
+                    },
+                    "ForAnyValue:StringLike": {
+                        "cognito-identity.amazonaws.com:amr": "authenticated",
+                    },
+                },
+                assume_role_action="sts:AssumeRoleWithWebIdentity",
+            ),
+        )
+
+        cognito.CfnIdentityPoolRoleAttachment(
+            self,
+            "IdentityPoolRoleAttachment",
+            identity_pool_id=self.identity_pool.ref,
+            roles={"authenticated": self.authenticated_role.role_arn},
+        )
+
+        CfnOutput(
+            self,
+            "IdentityPoolId",
+            value=self.identity_pool.ref,
+            description="Cognito Identity Pool ID — used by Amplify for direct DynamoDB reads",
+            export_name="FeedbackIdentityPoolId",
+        )
+
+    def configure_grants(self, table) -> None:
+        """Grant Identity Pool authenticated role read-only access to DynamoDB.
+
+        Called after DatabaseStack so app.py reads in dependency order:
+          1. API Gateway      (ApiStack.__init__)
+          2. Cognito          (CognitoStack.__init__ — User Pool + Identity Pool)
+          3. DynamoDB         (DatabaseStack)
+          4. Messaging + Lambda
+          5. api_stack.configure()        — POST /feedback + Cognito authorizer
+          6. cognito_stack.configure_grants() — DynamoDB read grant for Amplify
+        """
+        # Amplify exchanges the Cognito JWT for short-lived AWS credentials via
+        # the Identity Pool and uses them to query DynamoDB directly from the
+        # browser — this is the "read current recommendations" branch in the
+        # architecture diagram.
+        table.grant_read_data(self.authenticated_role)

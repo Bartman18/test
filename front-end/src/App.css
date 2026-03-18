@@ -242,7 +242,102 @@ body {
   color: #94a3b8;
   font-size: 0.875rem;
 }
+/* ── Sent / success banner ─────────────────────────────────────── */
+.sent-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  margin-top: 1rem;
+  padding: 1rem 1.25rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  color: #15803d;
+}
 
+.sent-banner p {
+  margin: 0.2rem 0 0;
+  font-size: 0.875rem;
+  color: #166534;
+}
+
+.sent-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+/* ── Recommendation accordion card ─────────────────────────────── */
+.rec-accordion {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+
+.rec-accordion:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.rec-accordion--open {
+  border-color: #bfdbfe;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.rec-accordion-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1.25rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.rec-accordion-header:hover {
+  background: #f8fafc;
+}
+
+.rec-accordion--open .rec-accordion-header {
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.rec-accordion-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.rec-accordion-preview {
+  font-size: 0.875rem;
+  color: #334155;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rec-accordion-chevron {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.rec-accordion-body {
+  padding: 1rem 1.25rem 1.25rem;
+  border-top: 1px solid #f1f5f9;
+}
 /* ── Navigation tabs ─────────────────────────────────────────────────────── */
 .nav-tabs {
   display: flex;

@@ -102,8 +102,12 @@ def test_get_all_recommendations_returns_200(mock_dynamodb):
 
 
 @patch("handler.dynamodb")
-def test_get_all_recommendations_no_items_returns_404(mock_dynamodb):
-    """Query: no items returns 404."""
+def test_get_all_recommendations_no_items_returns_200_empty(mock_dynamodb):
+    """Query: no items returns 200 with empty array (not 404).
+
+    An empty collection is a valid state — 404 is reserved for a specific
+    feedback_id that has not been processed yet (single-item GET path).
+    """
     mock_table = MagicMock()
     mock_dynamodb.Table.return_value = mock_table
     mock_table.query.return_value = {"Items": []}
@@ -111,7 +115,10 @@ def test_get_all_recommendations_no_items_returns_404(mock_dynamodb):
     from handler import lambda_handler
     response = lambda_handler(BASE_EVENT, {})
 
-    assert response["statusCode"] == 404
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["items"] == []
+    assert body["count"] == 0
 
 
 @patch("handler.dynamodb")

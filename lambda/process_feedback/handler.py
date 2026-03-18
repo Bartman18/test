@@ -84,7 +84,35 @@ def get_recommendation(feedback_text: str) -> str:
             body=request_body,
         )
         result = json.loads(response["body"].read())
-        recommendation: str = result["content"][0]["text"]  # Anthropic response format
+        # Flexible parsing: different Bedrock models return different JSON shapes.
+        # Try Anthropic 'content' format first, then fall back to 'results' (Titan),
+        # then to common alternatives. If none match, raise a helpful error.
+        def _extract_text(res: dict) -> str:
+            if not isinstance(res, dict):
+                raise KeyError("Bedrock response is not a JSON object")
+
+            if "content" in res and isinstance(res["content"], list):
+                first = res["content"][0]
+                if isinstance(first, dict) and "text" in first:
+                    return first["text"]
+
+            if "results" in res and isinstance(res["results"], list):
+                first = res["results"][0]
+                if isinstance(first, dict) and "outputText" in first:
+                    return first["outputText"]
+
+            # Common fallback: look for any nested text field
+            for key in ("output", "outputs", "message", "messages"):
+                if key in res and isinstance(res[key], list) and res[key]:
+                    candidate = res[key][0]
+                    if isinstance(candidate, dict):
+                        for subkey in ("text", "outputText", "content"):
+                            if subkey in candidate and isinstance(candidate[subkey], str):
+                                return candidate[subkey]
+
+            raise KeyError(f"Could not extract text from Bedrock response, keys={list(res.keys())}")
+
+        recommendation: str = _extract_text(result)
         logger.info("Bedrock response received, length=%d chars", len(recommendation))
         return recommendation
     except ClientError as exc:

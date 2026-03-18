@@ -1,5 +1,7 @@
-import { Authenticator, useTheme, View, Image, Text, Heading } from '@aws-amplify/ui-react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { Authenticator, useTheme, View, Text, Heading } from '@aws-amplify/ui-react';
 import FeedbackForm from './components/FeedbackForm';
+import RecommendationsPage from './pages/RecommendationsPage';
 
 const components = {
   Header() {
@@ -32,22 +34,46 @@ export default function App() {
   return (
     <Authenticator components={components} formFields={formFields}>
       {({ signOut, user }) => (
-        <div className="app">
-          <header className="header">
-            <span className="logo">
-              Feedback <span style={{ color: '#2563eb' }}>AI</span>
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span className="header-email">{user?.signInDetails?.loginId}</span>
-              <button className="btn-ghost" onClick={signOut}>
-                Sign out
-              </button>
-            </div>
-          </header>
-          <main className="main">
-            <FeedbackForm />
-          </main>
-        </div>
+        <BrowserRouter>
+          <div className="app">
+            {/* ── Top header ── */}
+            <header className="header">
+              <span className="logo">
+                Feedback <span style={{ color: '#2563eb' }}>AI</span>
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span className="header-email">{user?.signInDetails?.loginId}</span>
+                <button className="btn-ghost" onClick={signOut}>Sign out</button>
+              </div>
+            </header>
+
+            {/* ── Navigation tabs ── */}
+            <nav className="nav-tabs">
+              <NavLink
+                to="/submit"
+                className={({ isActive }) => 'nav-tab' + (isActive ? ' nav-tab--active' : '')}
+              >
+                ✏ Submit Feedback
+              </NavLink>
+              <NavLink
+                to="/recommendations"
+                className={({ isActive }) => 'nav-tab' + (isActive ? ' nav-tab--active' : '')}
+              >
+                📋 My Recommendations
+              </NavLink>
+            </nav>
+
+            {/* ── Page content ── */}
+            <main className="main">
+              <Routes>
+                <Route path="/submit"          element={<FeedbackForm />} />
+                <Route path="/recommendations" element={<RecommendationsPage />} />
+                {/* Default redirect to submit page */}
+                <Route path="*" element={<Navigate to="/submit" replace />} />
+              </Routes>
+            </main>
+          </div>
+        </BrowserRouter>
       )}
     </Authenticator>
   );

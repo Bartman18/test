@@ -1,64 +1,28 @@
 /**
- * FeedbackForm
+ * FeedbackForm  — Submit subpage
  *
- * Architecture (matches diagram):
+ * WRITE path (async):
+ *   POST /feedback → API Gateway → Lambda #1 → SNS → SQS → Lambda #2 → Bedrock → DynamoDB
+ *   Lambda #1 returns 202 + { feedback_id } immediately.
  *
- *   WRITE path (async):
- *     User submits → POST /feedback (API Gateway → Lambda #1 → SNS → SQS)
- *     Lambda #1 returns 202 + { feedback_id } immediately.
- *     Lambda #2 runs asynchronously: SQS → Bedrock → DynamoDB.
- *
- *   READ path (direct DynamoDB):
- *     Amplify exchanges the Cognito JWT for short-lived AWS credentials via
- *     the Cognito Identity Pool, then queries DynamoDB directly — no API
- *     Gateway or Lambda involved.
- *
- *   Polling:
- *     After receiving 202, poll DynamoDB directly every 3 s until the
- *     recommendation item appears (written by Lambda #2).
+ * Polling:
+ *   After 202, polls DynamoDB directly every 3 s until Lambda #2 writes the item.
+ *   Once found, shows the result inline. Full history is on the Recommendations page.
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchAuthSession } from 'aws-amplify/auth';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { useState, useRef, useCallback } from 'react';
+import { GetCommand } from '@aws-sdk/lib-dynamodb';
+import { API_URL, TABLE_NAME, authHeader, getDynamoContext } from '../lib/aws';
 import Recommendation from './Recommendation';
 
-const API_URL    = (process.env.REACT_APP_API_URL    || '').replace(/\/$/, '');
-const TABLE_NAME = process.env.REACT_APP_TABLE_NAME  || 'Recommendations';
-const AWS_REGION = process.env.REACT_APP_AWS_REGION  || 'eu-central-1';
-
 const POLL_INTERVAL_MS = 3_000;
-const POLL_TIMEOUT_MS  = 120_000; // 2 minutes max
+const POLL_TIMEOUT_MS  = 120_000; // 2 minutes
 
-// ── Auth helper — JWT for API Gateway (POST /feedback) ─────────────────────
-async function authHeader() {
-  const session = await fetchAuthSession();
-  const token   = session.tokens?.idToken?.toString();
-  return { Authorization: token };
-}
-
-// ── DynamoDB client — Identity Pool credentials for direct reads ───────────
-async function getDynamoContext() {
-  const session     = await fetchAuthSession();
-  const credentials = session.credentials;              // from Identity Pool
-  const userId      = session.tokens?.idToken?.payload?.sub;
-
-  const client    = new DynamoDBClient({ region: AWS_REGION, credentials });
-  const docClient = DynamoDBDocumentClient.from(client, {
-    marshallOptions:   { removeUndefinedValues: true },
-    unmarshallOptions: { wrapNumbers: false },
-  });
-
-  return { docClient, userId };
-}
-
-// ── Component ────────────────────────────────────────────────────────────────
 export default function FeedbackForm() {
-  const [text,            setText]            = useState('');
-  const [status,          setStatus]          = useState('idle');
+  const [text,     setText]     = useState('');
+  const [status,   setStatus]   = useState('idle');
   // idle | submitting | polling | done | error
-  const [errorMsg,        setErrorMsg]        = useState('');
-  const [recommendations, setRecommendations] = useState([]);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [result,   setResult]   = useState(null); // the recommendation item once ready
 
   const intervalRef  = useRef(null);
   const startTimeRef = useRef(null);
@@ -70,30 +34,7 @@ export default function FeedbackForm() {
     }
   }, []);
 
-  // ── On mount: load all existing recommendations directly from DynamoDB ───
-  useEffect(() => {
-    (async () => {
-      try {
-        const { docClient, userId } = await getDynamoContext();
-        if (!userId) return;
-
-        const result = await docClient.send(new QueryCommand({
-          TableName:                 TABLE_NAME,
-          KeyConditionExpression:    'user_id = :uid',
-          ExpressionAttributeValues: { ':uid': userId },
-          ScanIndexForward:          false, // newest first
-        }));
-
-        setRecommendations(result.Items || []);
-      } catch (_) {
-        // Silent fail — user may have no data yet
-      }
-    })();
-
-    return () => stopPolling();
-  }, [stopPolling]);
-
-  // ── Submit: POST /feedback → API Gateway → Lambda #1 → SNS (returns 202) ─
+  // ── Submit: POST /feedback → API Gateway ──────────────────────────────────
   async function handleSubmit(e) {
     e.preventDefault();
     const trimmed = text.trim();
@@ -101,6 +42,13 @@ export default function FeedbackForm() {
 
     setStatus('submitting');
     setErrorMsg('');
+    setResult(null);
+
+    if (!API_URL) {
+      setErrorMsg('API not configured — set REACT_APP_API_URL in your .env file (see .env.example).');
+      setStatus('error');
+      return;
+    }
 
     try {
       const res = await fetch(`${API_URL}/feedback`, {
@@ -113,7 +61,7 @@ export default function FeedbackForm() {
         const { feedback_id } = await res.json();
         setText('');
         setStatus('polling');
-        startPolling(feedback_id); // Lambda #2 will write to DynamoDB async
+        startPolling(feedback_id);
       } else {
         const err = await res.json().catch(() => ({}));
         setErrorMsg(err.error || `Unexpected status ${res.status}`);
@@ -125,7 +73,7 @@ export default function FeedbackForm() {
     }
   }
 
-  // ── Poll DynamoDB directly until Lambda #2 writes the recommendation ──────
+  // ── Poll DynamoDB until Lambda #2 writes the recommendation ───────────────
   function startPolling(feedback_id) {
     startTimeRef.current = Date.now();
 
@@ -133,7 +81,7 @@ export default function FeedbackForm() {
       if (Date.now() - startTimeRef.current > POLL_TIMEOUT_MS) {
         stopPolling();
         setStatus('error');
-        setErrorMsg('Still processing — check back in a moment.');
+        setErrorMsg('Still processing — check back in Recommendations.');
         return;
       }
 
@@ -141,19 +89,18 @@ export default function FeedbackForm() {
         const { docClient, userId } = await getDynamoContext();
         if (!userId) return;
 
-        const result = await docClient.send(new GetCommand({
+        const res = await docClient.send(new GetCommand({
           TableName: TABLE_NAME,
           Key:       { user_id: userId, feedback_id },
         }));
 
-        if (result.Item) {
+        if (res.Item) {
           stopPolling();
-          setRecommendations(prev => [result.Item, ...prev]);
+          setResult(res.Item);
           setStatus('done');
         }
-        // Item not yet written by Lambda #2 → keep polling
       } catch {
-        // Credential or network hiccup → keep polling
+        // Network/credential hiccup — keep polling
       }
     }, POLL_INTERVAL_MS);
   }
@@ -164,7 +111,13 @@ export default function FeedbackForm() {
 
   return (
     <div>
-      {/* ── Form card ── */}
+      <div className="page-header">
+        <h2 className="page-title">Submit Feedback</h2>
+        <p className="page-desc">
+          Paste feedback you received and get an AI-generated career action plan.
+        </p>
+      </div>
+
       <div className="card">
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -178,7 +131,7 @@ export default function FeedbackForm() {
               onChange={e => setText(e.target.value)}
               placeholder="e.g. You need to improve communication with the team and take more ownership in meetings…"
               disabled={isDisabled}
-              rows={4}
+              rows={5}
             />
           </div>
 
@@ -209,22 +162,12 @@ export default function FeedbackForm() {
         </form>
       </div>
 
-      {/* ── Recommendations list (read directly from DynamoDB) ── */}
-      {recommendations.length > 0 ? (
+      {/* ── Inline result for the just-submitted item ── */}
+      {result && (
         <>
-          <p className="section-title">
-            Recommendations ({recommendations.length})
-          </p>
-          {recommendations.map(item => (
-            <Recommendation key={item.feedback_id} item={item} />
-          ))}
+          <p className="section-title">Your new recommendation</p>
+          <Recommendation item={result} />
         </>
-      ) : (
-        !isPolling && status !== 'submitting' && (
-          <p className="empty-state">
-            No recommendations yet — submit your first feedback above.
-          </p>
-        )
       )}
     </div>
   );

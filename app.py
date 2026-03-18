@@ -28,13 +28,13 @@ lambda_stack = LambdaStack(
     queue=messaging_stack.queue,
 )
 
-# ── 4. Branch 1+2: Cognito authorizer + POST /feedback route → async pipeline
-#       API Gateway → Authorizer → Cognito        (Branch 1 — auth)
-#       API Gateway → Lambda #1 → SNS → SQS → Lambda #2 → Bedrock → DynamoDB
-#                                              (Branch 2 — compute)
+# ── 4. Wire Cognito authorizer + all routes into API Gateway
+#       POST /feedback       → Lambda #1 → SNS → SQS → Lambda #2 → Bedrock → DynamoDB
+#       GET  /recommendation → Lambda #3 → DynamoDB Query
 api_stack.configure(
     user_pool=cognito_stack.user_pool,
     post_feedback_fn=lambda_stack.post_feedback_fn,
+    get_recommendation_fn=lambda_stack.get_recommendation_fn,
 )
 
 # ── 5. Read path: grant Identity Pool authenticated role read-only DynamoDB access

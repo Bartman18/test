@@ -60,10 +60,11 @@ def _all_stacks(app: cdk.App):
         queue=messaging.queue,
     )
 
-    # 4. Connect Cognito authorizer + POST /feedback route to API Gateway
+# 4. Connect Cognito authorizer + all routes to API Gateway
     api.configure(
         user_pool=cognito.user_pool,
         post_feedback_fn=lambdas.post_feedback_fn,
+        get_recommendation_fn=lambdas.get_recommendation_fn,
     )
 
     # 5. Grant Identity Pool authenticated role read-only access to DynamoDB
@@ -252,12 +253,8 @@ class TestLambdaStack:
         self.template = assertions.Template.from_stack(stack)
 
     def test_three_lambda_functions_created(self):
-        """2 business Lambda functions + 1 CDK LogRetention helper = 3 total.
-
-        GetRecommendationFunction (Lambda #3) is removed — Amplify reads
-        DynamoDB directly via Identity Pool credentials.
-        """
-        self.template.resource_count_is("AWS::Lambda::Function", 3)
+        """3 business Lambda functions + 1 CDK LogRetention helper = 4 total."""
+        self.template.resource_count_is("AWS::Lambda::Function", 4)
 
     def test_all_functions_use_python311(self):
         """All Lambda functions use Python 3.11 runtime."""
@@ -288,6 +285,16 @@ class TestLambdaStack:
                 "Variables": assertions.Match.object_like({
                     "TABLE_NAME": assertions.Match.any_value(),
                     "BEDROCK_MODEL_ID": "anthropic.claude-3-haiku-20240307-v1:0",
+                })
+            }
+        })
+
+    def test_get_recommendation_env_vars(self):
+        """GetRecommendationFunction has TABLE_NAME environment variable."""
+        self.template.has_resource_properties("AWS::Lambda::Function", {
+            "Environment": {
+                "Variables": assertions.Match.object_like({
+                    "TABLE_NAME": assertions.Match.any_value(),
                 })
             }
         })

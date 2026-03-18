@@ -59,16 +59,14 @@ class ApiStack(Stack):
         self,
         user_pool: cognito.UserPool,
         post_feedback_fn: aws_lambda.Function,
+        get_recommendation_fn: aws_lambda.Function,
     ) -> None:
-        """Wire the Cognito authorizer and POST /feedback route into the REST API.
+        """Wire the Cognito authorizer and all routes into the REST API.
 
-        Architecture — two branches from API Gateway (matches diagram):
-          Branch 1 — Authorizer: API Gateway → Authorizer → Cognito (JWT validation)
-          Branch 2 — Compute:    API Gateway → Lambda #1  → SNS → SQS → Lambda #2
-                                                           → Bedrock → DynamoDB
-
-        The READ path is NOT through API Gateway. Amplify reads recommendations
-        directly from DynamoDB using Cognito Identity Pool credentials.
+        Endpoints:
+          POST /feedback       → Lambda #1 → SNS → SQS → Lambda #2 → Bedrock → DynamoDB
+          GET  /recommendation → Lambda #3 → DynamoDB Query
+        Both routes require a valid Cognito JWT in the Authorization header.
         """
         # ── Branch 1: Cognito Authorizer ─────────────────────────────────────
         # Validates every JWT against the Cognito User Pool before any Lambda
@@ -101,6 +99,26 @@ class ApiStack(Stack):
             ],
         )
 
+        # ── GET /recommendation ───────────────────────────────────────────────
+        # Returns all AI recommendations for the authenticated user (or one by
+        # feedback_id if ?feedback_id=<id> is supplied as a query parameter).
+        # Lambda #3 queries DynamoDB server-side using its own IAM role.
+        recommendation_resource = self.api.root.add_resource("recommendation")
+        recommendation_resource.add_method(
+            "GET",
+            apigw.LambdaIntegration(
+                get_recommendation_fn,
+                proxy=True,
+            ),
+            authorizer=authorizer,
+            authorization_type=apigw.AuthorizationType.COGNITO,
+            method_responses=[
+                apigw.MethodResponse(status_code="200"),
+                apigw.MethodResponse(status_code="404"),
+                apigw.MethodResponse(status_code="500"),
+            ],
+        )
+
         # ── Outputs ──────────────────────────────────────────────────────────
         CfnOutput(
             self,
@@ -114,4 +132,10 @@ class ApiStack(Stack):
             "PostFeedbackEndpoint",
             value=f"{self.api.url}feedback",
             description="POST /feedback endpoint",
+        )
+        CfnOutput(
+            self,
+            "GetRecommendationEndpoint",
+            value=f"{self.api.url}recommendation",
+            description="GET /recommendation endpoint",
         )

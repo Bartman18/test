@@ -88,9 +88,23 @@ class LambdaStack(Stack):
             event_sources.SqsEventSource(queue, batch_size=1)
         )
 
+        # ── Lambda #3 — GetRecommendationFunction ────────────────────────────
+        self.get_recommendation_fn = aws_lambda.Function(
+            self,
+            "GetRecommendationFunction",
+            **common_props,
+            code=aws_lambda.Code.from_asset("lambda/get_recommendation"),
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            environment={
+                "TABLE_NAME": table.table_name,
+            },
+            description="Handles GET /recommendation — queries DynamoDB for user's recommendations.",
+        )
+        # Read-only access to the Recommendations table
+        table.grant_read_data(self.get_recommendation_fn)
+
         # ── Outputs ──────────────────────────────────────────────────────────
-        # NOTE: GetRecommendationFunction (Lambda #3) is intentionally removed.
-        # Recommendations are read DIRECTLY from DynamoDB by Amplify using
-        # Cognito Identity Pool credentials — no Lambda or API Gateway needed.
         CfnOutput(self, "PostFeedbackFnArn", value=self.post_feedback_fn.function_arn)
         CfnOutput(self, "ProcessFeedbackFnArn", value=self.process_feedback_fn.function_arn)
+        CfnOutput(self, "GetRecommendationFnArn", value=self.get_recommendation_fn.function_arn)

@@ -218,10 +218,10 @@ class TestMessagingStack:
         })
 
     def test_feedback_queue_visibility_timeout(self):
-        """Visibility timeout is 360s (≥ 6× Lambda #2 timeout of 300s)."""
+        """Visibility timeout is 1800s (= 6× Lambda #2 timeout of 300s)."""
         self.template.has_resource_properties("AWS::SQS::Queue", {
             "QueueName": "FeedbackQueue",
-            "VisibilityTimeout": 360,
+            "VisibilityTimeout": 1800,
         })
 
     def test_sns_sqs_subscription_exists(self):

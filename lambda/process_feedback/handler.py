@@ -18,6 +18,7 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -85,23 +86,26 @@ def get_recommendation(feedback_text: str) -> str:
         recommendation: str = result["results"][0]["outputText"]
         logger.info("Bedrock response received, length=%d chars", len(recommendation))
         return recommendation
-    except bedrock_client.exceptions.ResourceNotFoundException:
-        logger.error(
-            "Bedrock model '%s' not found or not enabled. "
-            "Go to AWS Console → Amazon Bedrock → Model access and enable this model "
-            "for region %s, then redeploy.",
-            BEDROCK_MODEL_ID,
-            os.environ.get("AWS_REGION", "unknown"),
-        )
-        raise
-    except bedrock_client.exceptions.AccessDeniedException:
-        logger.error(
-            "Access denied calling Bedrock model '%s'. "
-            "Check the Lambda IAM role has bedrock:InvokeModel permission "
-            "and the model is enabled in Bedrock Model access.",
-            BEDROCK_MODEL_ID,
-        )
-        raise
+    except ClientError as exc:
+        error_code = exc.response["Error"]["Code"]
+        if error_code == "ResourceNotFoundException":
+            logger.error(
+                "Bedrock model '%s' not found or not enabled. "
+                "Go to AWS Console → Amazon Bedrock → Model access and enable this model "
+                "for region %s, then redeploy.",
+                BEDROCK_MODEL_ID,
+                os.environ.get("AWS_REGION", "unknown"),
+            )
+        elif error_code == "AccessDeniedException":
+            logger.error(
+                "Access denied calling Bedrock model '%s'. "
+                "Check the Lambda IAM role has bedrock:InvokeModel permission "
+                "and the model is enabled in Bedrock Model access.",
+                BEDROCK_MODEL_ID,
+            )
+        else:
+            logger.exception("Bedrock ClientError for model=%s", BEDROCK_MODEL_ID)
+        raise  # Re-raise → SQS will retry → DLQ after max_receive_count
     except Exception:
         logger.exception("Bedrock invocation failed for model=%s", BEDROCK_MODEL_ID)
         raise  # Re-raise → SQS will retry → DLQ after max_receive_count

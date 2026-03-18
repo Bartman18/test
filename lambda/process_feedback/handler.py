@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -63,15 +63,13 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
-    # Anthropic Claude Messages API format (supported on Bedrock)
+    # Mistral instruct prompt format used by all Mistral models on Bedrock
+    mistral_prompt = f"<s>[INST] {prompt} [/INST]"
     request_body = json.dumps(
         {
-            "anthropic_version": "bedrock-2023-05-31",
+            "prompt": mistral_prompt,
             "max_tokens": 512,
             "temperature": 0.7,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
         }
     )
 
@@ -91,18 +89,26 @@ def get_recommendation(feedback_text: str) -> str:
             if not isinstance(res, dict):
                 raise KeyError("Bedrock response is not a JSON object")
 
+            # Mistral: { "outputs": [ { "text": "...", "stop_reason": "stop" } ] }
+            if "outputs" in res and isinstance(res["outputs"], list) and res["outputs"]:
+                first = res["outputs"][0]
+                if isinstance(first, dict) and "text" in first:
+                    return first["text"]
+
+            # Anthropic Claude: { "content": [ { "type": "text", "text": "..." } ] }
             if "content" in res and isinstance(res["content"], list):
                 first = res["content"][0]
                 if isinstance(first, dict) and "text" in first:
                     return first["text"]
 
+            # Amazon Titan: { "results": [ { "outputText": "..." } ] }
             if "results" in res and isinstance(res["results"], list):
                 first = res["results"][0]
                 if isinstance(first, dict) and "outputText" in first:
                     return first["outputText"]
 
-            # Common fallback: look for any nested text field
-            for key in ("output", "outputs", "message", "messages"):
+            # Generic fallback for any other nested text field
+            for key in ("output", "message", "messages"):
                 if key in res and isinstance(res[key], list) and res[key]:
                     candidate = res[key][0]
                     if isinstance(candidate, dict):

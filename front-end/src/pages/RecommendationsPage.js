@@ -1,14 +1,15 @@
 /**
  * RecommendationsPage — read subpage
  *
- * READ path (direct DynamoDB):
- *   Amplify exchanges the Cognito JWT for short-lived AWS credentials via
- *   the Cognito Identity Pool, then queries DynamoDB directly — no API
- *   Gateway or Lambda involved.
+ * READ path (via API Gateway):
+ *   GET /recommendation  →  API Gateway (Cognito authorizer)
+ *   →  Lambda #3  →  DynamoDB Query  →  { items: [...] }
+ *
+ *   Uses the same Cognito ID-token JWT already in the browser session.
+ *   No Identity Pool or DynamoDB SDK credentials needed.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { TABLE_NAME, getDynamoContext } from '../lib/aws';
+import { API_URL, authHeader } from '../lib/aws';
 import Recommendation from '../components/Recommendation';
 
 export default function RecommendationsPage() {
@@ -20,19 +21,24 @@ export default function RecommendationsPage() {
     setLoading(true);
     setError('');
     try {
-      const { docClient, userId } = await getDynamoContext();
-      if (!userId) { setLoading(false); return; }
+      const res = await fetch(`${API_URL}/recommendation`, {
+        headers: await authHeader(),
+      });
 
-      const result = await docClient.send(new QueryCommand({
-        TableName:                 TABLE_NAME,
-        KeyConditionExpression:    'user_id = :uid',
-        ExpressionAttributeValues: { ':uid': userId },
-        ScanIndexForward:          false, // newest first
-      }));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
 
-      setItems(result.Items || []);
+      const data = await res.json();
+      // Sort newest-first by timestamp (Lambda returns in DynamoDB scan order)
+      const sorted = (data.items || []).sort((a, b) =>
+        (b.timestamp || '').localeCompare(a.timestamp || '')
+      );
+      setItems(sorted);
     } catch (err) {
-      setError('Failed to load recommendations. Please try again.');
+      console.error('[RecommendationsPage] load error', err);
+      setError(`Failed to load recommendations: ${err.message}`);
     } finally {
       setLoading(false);
     }

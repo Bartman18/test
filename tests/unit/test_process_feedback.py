@@ -41,7 +41,7 @@ SQS_EVENT = {
 @pytest.fixture(autouse=True)
 def set_env(monkeypatch):
     monkeypatch.setenv("TABLE_NAME", "Recommendations")
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "amazon.titan-text-premier-v1:0")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 
 
 @patch("handler.dynamodb")
@@ -109,7 +109,7 @@ def test_process_feedback_dynamodb_failure_raises(mock_bedrock, mock_dynamodb):
     """DynamoDB failure re-raises so SQS can retry the message."""
     mock_response_body = MagicMock()
     mock_response_body.read.return_value = json.dumps(
-        {"results": [{"outputText": "Some recommendation"}]}
+        {"content": [{"type": "text", "text": "Some recommendation"}]}
     )
     mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
 

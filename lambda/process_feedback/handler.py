@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.titan-text-premier-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -63,14 +63,15 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
+    # Anthropic Claude Messages API format (supported on Bedrock)
     request_body = json.dumps(
         {
-            "inputText": prompt,
-            "textGenerationConfig": {
-                "maxTokenCount": 512,
-                "temperature": 0.7,
-                "topP": 0.9,
-            },
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 512,
+            "temperature": 0.7,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
         }
     )
 
@@ -83,7 +84,7 @@ def get_recommendation(feedback_text: str) -> str:
             body=request_body,
         )
         result = json.loads(response["body"].read())
-        recommendation: str = result["results"][0]["outputText"]
+        recommendation: str = result["content"][0]["text"]  # Anthropic response format
         logger.info("Bedrock response received, length=%d chars", len(recommendation))
         return recommendation
     except ClientError as exc:
@@ -91,19 +92,17 @@ def get_recommendation(feedback_text: str) -> str:
         if error_code == "ResourceNotFoundException":
             logger.error(
                 "Bedrock model '%s' not found in region %s. "
-                "This usually means: (1) the model ID is wrong, "
-                "(2) the model has reached end-of-life (e.g. amazon.titan-text-express-v1 is EOL — "
-                "use amazon.titan-text-premier-v1:0 instead), or "
-                "(3) the model is not yet enabled — go to AWS Console → Bedrock → Model access.",
+                "Check: (1) model ID is correct, (2) model is enabled in "
+                "AWS Console → Bedrock → Model access.",
                 BEDROCK_MODEL_ID,
                 os.environ.get("AWS_REGION", "unknown"),
             )
-        elif error_code == "AccessDeniedException":
+        elif error_code in ("AccessDeniedException", "ValidationException"):
             logger.error(
-                "Access denied calling Bedrock model '%s'. "
-                "Check the Lambda IAM role has bedrock:InvokeModel permission "
-                "and the model is enabled in Bedrock Model access.",
+                "Bedrock call rejected for model '%s' (code=%s). "
+                "Check IAM role has bedrock:InvokeModel and model is enabled in Bedrock Model access.",
                 BEDROCK_MODEL_ID,
+                error_code,
             )
         else:
             logger.exception("Bedrock ClientError for model=%s", BEDROCK_MODEL_ID)

@@ -185,12 +185,12 @@ feedback-app/
 - [ ] Deploy via Amplify Console (connect to Git repo)
 
 ### Phase 8 — Amazon Bedrock Integration (inside Lambda #2) ✅
-- [x] Model: `amazon.titan-text-premier-v1:0` (set via `BEDROCK_MODEL_ID` env var, replaces EOL `amazon.titan-text-express-v1`)
+- [x] Model: `anthropic.claude-3-haiku-20240307-v1:0` (replaces EOL Titan Text models; set via `BEDROCK_MODEL_ID` env var)
 - [x] Construct career-coach prompt with `feedback_text` injected
 - [x] Parse `result["results"][0]["outputText"]` from Titan response
 - [x] Handle Bedrock throttling — exceptions re-raise to trigger SQS retry → DLQ after 3 attempts
 - [x] IAM `bedrock:InvokeModel` granted via `PolicyStatement` scoped to:
-  `arn:aws:bedrock:{region}::foundation-model/amazon.titan-text-premier-v1:0`
+  `arn:aws:bedrock:{region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0`
 
 > 🔴 **MANUAL STEP REQUIRED — will fail silently without this:**
 > Go to **AWS Console → Amazon Bedrock → Model access** and request/enable access to

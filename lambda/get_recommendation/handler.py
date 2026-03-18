@@ -81,7 +81,6 @@ def lambda_handler(event: dict, context) -> dict:
         return build_response(500, {"error": "Failed to retrieve recommendations"})
 
     items = response.get("Items", [])
-    if not items:
-        return build_response(404, {"error": "No recommendations found for this user"})
-
+    # Return 200 with empty array — the collection exists, it is just empty.
+    # 404 is reserved for a specific feedback_id that has not been processed yet.
     return build_response(200, {"items": items, "count": len(items)})

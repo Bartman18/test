@@ -34,8 +34,21 @@ def _make_app() -> cdk.App:
 
 
 def _all_stacks(app: cdk.App):
-    """Return all stacks wired together (mirrors app.py)."""
+    """Return all stacks wired together (mirrors app.py).
+
+    Order reflects the diagram:
+      1. API Gateway  — public entry-point (ApiStack.__init__)
+      2. Cognito      — user pool that backs the authorizer
+      3. Back-end     — DynamoDB, SNS/SQS, Lambda functions
+      4. configure()  — attaches Cognito authorizer + routes to the API Gateway
+    """
+    # 1. API Gateway first
+    api = ApiStack(app, "ApiStack")
+
+    # 2. Cognito next
     cognito = CognitoStack(app, "CognitoStack")
+
+    # 3. Remaining back-end infrastructure
     database = DatabaseStack(app, "DatabaseStack")
     messaging = MessagingStack(app, "MessagingStack")
     lambdas = LambdaStack(
@@ -45,13 +58,14 @@ def _all_stacks(app: cdk.App):
         topic=messaging.topic,
         queue=messaging.queue,
     )
-    api = ApiStack(
-        app,
-        "ApiStack",
+
+    # 4. Connect Cognito authorizer + Lambda routes to the API Gateway
+    api.configure(
         user_pool=cognito.user_pool,
         post_feedback_fn=lambdas.post_feedback_fn,
         get_recommendation_fn=lambdas.get_recommendation_fn,
     )
+
     return cognito, database, messaging, lambdas, api
 
 

@@ -66,7 +66,7 @@ class LambdaStack(Stack):
             memory_size=512,
             environment={
                 "TABLE_NAME": table.table_name,
-                "BEDROCK_MODEL_ID": "mistral.mistral-7b-instruct-v0:2",
+                "BEDROCK_MODEL_ID": "amazon.nova-micro-v1:0",
             },
             description="Consumes SQS, calls Bedrock, saves recommendation to DynamoDB.",
         )
@@ -78,7 +78,7 @@ class LambdaStack(Stack):
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2"
+                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.nova-micro-v1:0"
                 ],
             )
         )

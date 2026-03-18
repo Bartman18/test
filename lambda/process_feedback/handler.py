@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -63,13 +63,19 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
-    # Mistral instruct prompt format used by all Mistral models on Bedrock
-    mistral_prompt = f"<s>[INST] {prompt} [/INST]"
+    # Amazon Nova Messages API format (works with Nova Micro/Lite/Pro on Bedrock)
     request_body = json.dumps(
         {
-            "prompt": mistral_prompt,
-            "max_tokens": 512,
-            "temperature": 0.7,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}],
+                }
+            ],
+            "inferenceConfig": {
+                "maxTokens": 512,
+                "temperature": 0.7,
+            },
         }
     )
 
@@ -89,7 +95,15 @@ def get_recommendation(feedback_text: str) -> str:
             if not isinstance(res, dict):
                 raise KeyError("Bedrock response is not a JSON object")
 
-            # Mistral: { "outputs": [ { "text": "...", "stop_reason": "stop" } ] }
+            # Amazon Nova: { "output": { "message": { "content": [ { "text": "..." } ] } } }
+            output = res.get("output")
+            if isinstance(output, dict):
+                message = output.get("message", {})
+                content = message.get("content", [])
+                if content and isinstance(content[0], dict) and "text" in content[0]:
+                    return content[0]["text"]
+
+            # Mistral: { "outputs": [ { "text": "..." } ] }
             if "outputs" in res and isinstance(res["outputs"], list) and res["outputs"]:
                 first = res["outputs"][0]
                 if isinstance(first, dict) and "text" in first:
@@ -106,15 +120,6 @@ def get_recommendation(feedback_text: str) -> str:
                 first = res["results"][0]
                 if isinstance(first, dict) and "outputText" in first:
                     return first["outputText"]
-
-            # Generic fallback for any other nested text field
-            for key in ("output", "message", "messages"):
-                if key in res and isinstance(res[key], list) and res[key]:
-                    candidate = res[key][0]
-                    if isinstance(candidate, dict):
-                        for subkey in ("text", "outputText", "content"):
-                            if subkey in candidate and isinstance(candidate[subkey], str):
-                                return candidate[subkey]
 
             raise KeyError(f"Could not extract text from Bedrock response, keys={list(res.keys())}")
 

@@ -41,18 +41,24 @@ SQS_EVENT = {
 @pytest.fixture(autouse=True)
 def set_env(monkeypatch):
     monkeypatch.setenv("TABLE_NAME", "Recommendations")
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
 
 
 @patch("handler.dynamodb")
 @patch("handler.bedrock_client")
 def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     """Happy path: Bedrock returns recommendation, item saved to DynamoDB."""
-    # Mock Bedrock response — Mistral outputs format
+    # Mock Bedrock response — Amazon Nova Messages API format
     mock_response_body = MagicMock()
-    mock_response_body.read.return_value = json.dumps(
-        {"outputs": [{"text": "Focus on active listening and delegation.", "stop_reason": "stop"}]}
-    )
+    mock_response_body.read.return_value = json.dumps({
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [{"text": "Focus on active listening and delegation."}],
+            }
+        },
+        "stopReason": "end_turn",
+    })
     mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
 
     # Mock DynamoDB Table
@@ -66,10 +72,10 @@ def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     # Bedrock was called
     mock_bedrock.invoke_model.assert_called_once()
     call_kwargs = mock_bedrock.invoke_model.call_args[1]
-    assert call_kwargs["modelId"] == "mistral.mistral-7b-instruct-v0:2"
+    assert call_kwargs["modelId"] == "amazon.nova-micro-v1:0"
     request_body = json.loads(call_kwargs["body"])
-    # Mistral format: prompt field contains the feedback text
-    assert PAYLOAD["feedback_text"] in request_body["prompt"]
+    # Nova format: messages[0].content[0].text holds the prompt
+    assert PAYLOAD["feedback_text"] in request_body["messages"][0]["content"][0]["text"]
 
     # DynamoDB put_item was called with correct keys
     mock_table.put_item.assert_called_once()
@@ -109,9 +115,15 @@ def test_process_feedback_bedrock_failure_raises(mock_bedrock, mock_dynamodb):
 def test_process_feedback_dynamodb_failure_raises(mock_bedrock, mock_dynamodb):
     """DynamoDB failure re-raises so SQS can retry the message."""
     mock_response_body = MagicMock()
-    mock_response_body.read.return_value = json.dumps(
-        {"outputs": [{"text": "Some recommendation", "stop_reason": "stop"}]}
-    )
+    mock_response_body.read.return_value = json.dumps({
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [{"text": "Some recommendation"}],
+            }
+        },
+        "stopReason": "end_turn",
+    })
     mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
 
     mock_table = MagicMock()

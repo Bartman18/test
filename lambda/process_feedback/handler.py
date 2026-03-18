@@ -28,6 +28,13 @@ bedrock_client = boto3.client("bedrock-runtime")
 TABLE_NAME = os.environ["TABLE_NAME"]
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.titan-text-express-v1")
 
+# Log resolved config on cold start — visible in CloudWatch Logs
+logger.info(
+    "ProcessFeedbackFunction cold start: TABLE_NAME=%s BEDROCK_MODEL_ID=%s",
+    TABLE_NAME,
+    BEDROCK_MODEL_ID,
+)
+
 
 # ── SNS-over-SQS envelope unwrapping ────────────────────────────────────────
 
@@ -78,6 +85,23 @@ def get_recommendation(feedback_text: str) -> str:
         recommendation: str = result["results"][0]["outputText"]
         logger.info("Bedrock response received, length=%d chars", len(recommendation))
         return recommendation
+    except bedrock_client.exceptions.ResourceNotFoundException:
+        logger.error(
+            "Bedrock model '%s' not found or not enabled. "
+            "Go to AWS Console → Amazon Bedrock → Model access and enable this model "
+            "for region %s, then redeploy.",
+            BEDROCK_MODEL_ID,
+            os.environ.get("AWS_REGION", "unknown"),
+        )
+        raise
+    except bedrock_client.exceptions.AccessDeniedException:
+        logger.error(
+            "Access denied calling Bedrock model '%s'. "
+            "Check the Lambda IAM role has bedrock:InvokeModel permission "
+            "and the model is enabled in Bedrock Model access.",
+            BEDROCK_MODEL_ID,
+        )
+        raise
     except Exception:
         logger.exception("Bedrock invocation failed for model=%s", BEDROCK_MODEL_ID)
         raise  # Re-raise → SQS will retry → DLQ after max_receive_count

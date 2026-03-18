@@ -30,12 +30,15 @@ class MessagingStack(Stack):
         )
 
         # ── Main Feedback Queue ──────────────────────────────────────────────
-        # visibility_timeout must be >= 6x the Lambda #2 timeout (5 min → 360s min)
+        # visibility_timeout must be >= 6x the Lambda #2 timeout.
+        # Lambda #2 timeout = 5 min = 300 s  →  6 × 300 = 1 800 s (30 min).
+        # Previous value was 360 s (only 1.2×) — messages became visible again
+        # while Lambda was still processing, exhausting retries → premature DLQ.
         self.queue = sqs.Queue(
             self,
             "FeedbackQueue",
             queue_name="FeedbackQueue",
-            visibility_timeout=Duration.seconds(360),
+            visibility_timeout=Duration.seconds(1800),  # 30 min = 6 × Lambda timeout
             dead_letter_queue=sqs.DeadLetterQueue(
                 queue=self.dlq,
                 max_receive_count=3,
@@ -77,6 +80,13 @@ class MessagingStack(Stack):
             self,
             "FeedbackDLQUrl",
             value=self.dlq.queue_url,
-            description="Dead Letter Queue URL",
+            description="Dead Letter Queue URL — messages here mean Lambda #2 failed 3 times",
             export_name="FeedbackDLQUrl",
+        )
+        CfnOutput(
+            self,
+            "FeedbackDLQArn",
+            value=self.dlq.queue_arn,
+            description="DLQ ARN — use in CloudWatch alarm to alert on failed processing",
+            export_name="FeedbackDLQArn",
         )

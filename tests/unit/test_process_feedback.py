@@ -48,10 +48,10 @@ def set_env(monkeypatch):
 @patch("handler.bedrock_client")
 def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     """Happy path: Bedrock returns recommendation, item saved to DynamoDB."""
-    # Mock Bedrock response
+    # Mock Bedrock response — Anthropic Claude Messages API format
     mock_response_body = MagicMock()
     mock_response_body.read.return_value = json.dumps(
-        {"results": [{"outputText": "Focus on active listening and delegation."}]}
+        {"content": [{"type": "text", "text": "Focus on active listening and delegation."}]}
     )
     mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
 
@@ -66,9 +66,10 @@ def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     # Bedrock was called
     mock_bedrock.invoke_model.assert_called_once()
     call_kwargs = mock_bedrock.invoke_model.call_args[1]
-    assert call_kwargs["modelId"] == "amazon.titan-text-premier-v1:0"
+    assert call_kwargs["modelId"] == "anthropic.claude-3-haiku-20240307-v1:0"
     request_body = json.loads(call_kwargs["body"])
-    assert PAYLOAD["feedback_text"] in request_body["inputText"]
+    # Claude Messages API format: messages[0].content holds the prompt
+    assert PAYLOAD["feedback_text"] in request_body["messages"][0]["content"]
 
     # DynamoDB put_item was called with correct keys
     mock_table.put_item.assert_called_once()

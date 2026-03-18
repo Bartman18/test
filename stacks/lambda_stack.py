@@ -66,7 +66,7 @@ class LambdaStack(Stack):
             memory_size=512,
             environment={
                 "TABLE_NAME": table.table_name,
-                "BEDROCK_MODEL_ID": "amazon.nova-micro-v1:0",
+                "BEDROCK_MODEL_ID": "anthropic.claude-haiku-4-5-20250714-v1:0",
             },
             description="Consumes SQS, calls Bedrock, saves recommendation to DynamoDB.",
         )
@@ -78,7 +78,7 @@ class LambdaStack(Stack):
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.nova-micro-v1:0"
+                    f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-haiku-4-5-20250714-v1:0"
                 ],
             )
         )

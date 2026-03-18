@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-haiku-4-5-20250714-v1:0")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -63,19 +63,15 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
-    # Amazon Nova Messages API format (works with Nova Micro/Lite/Pro on Bedrock)
+    # Anthropic Messages API format — used by all Claude 3/4 models on Bedrock
     request_body = json.dumps(
         {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 512,
+            "temperature": 0.7,
             "messages": [
-                {
-                    "role": "user",
-                    "content": [{"text": prompt}],
-                }
+                {"role": "user", "content": prompt},
             ],
-            "inferenceConfig": {
-                "maxTokens": 512,
-                "temperature": 0.7,
-            },
         }
     )
 
@@ -95,6 +91,12 @@ def get_recommendation(feedback_text: str) -> str:
             if not isinstance(res, dict):
                 raise KeyError("Bedrock response is not a JSON object")
 
+            # Anthropic Claude (all versions): { "content": [ { "type": "text", "text": "..." } ] }
+            if "content" in res and isinstance(res["content"], list) and res["content"]:
+                first = res["content"][0]
+                if isinstance(first, dict) and "text" in first:
+                    return first["text"]
+
             # Amazon Nova: { "output": { "message": { "content": [ { "text": "..." } ] } } }
             output = res.get("output")
             if isinstance(output, dict):
@@ -109,14 +111,8 @@ def get_recommendation(feedback_text: str) -> str:
                 if isinstance(first, dict) and "text" in first:
                     return first["text"]
 
-            # Anthropic Claude: { "content": [ { "type": "text", "text": "..." } ] }
-            if "content" in res and isinstance(res["content"], list):
-                first = res["content"][0]
-                if isinstance(first, dict) and "text" in first:
-                    return first["text"]
-
             # Amazon Titan: { "results": [ { "outputText": "..." } ] }
-            if "results" in res and isinstance(res["results"], list):
+            if "results" in res and isinstance(res["results"], list) and res["results"]:
                 first = res["results"][0]
                 if isinstance(first, dict) and "outputText" in first:
                     return first["outputText"]

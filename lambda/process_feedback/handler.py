@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-haiku-4-5-20250714-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "eu.anthropic.claude-3-5-haiku-20241022-v1:0")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(

@@ -45,7 +45,12 @@ export default function FeedbackForm() {
     setResult(null);
 
     if (!API_URL) {
-      setErrorMsg('API not configured — set REACT_APP_API_URL in your .env file (see .env.example).');
+      setErrorMsg(
+        'REACT_APP_API_URL is not configured. ' +
+        'If running locally: copy .env.example to .env.local and fill in the value. ' +
+        'If deployed on Amplify: add REACT_APP_API_URL in Amplify Console → Environment variables, ' +
+        'then redeploy (env vars are baked in at build time — a new build is required).'
+      );
       setStatus('error');
       return;
     }

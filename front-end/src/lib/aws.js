@@ -10,10 +10,20 @@ export const API_URL    = (process.env.REACT_APP_API_URL    || '').replace(/\/$/
 export const TABLE_NAME = process.env.REACT_APP_TABLE_NAME  || 'Recommendations';
 export const AWS_REGION = process.env.REACT_APP_AWS_REGION  || 'eu-central-1';
 
+// Debug: log resolved config on app load so you can verify env vars were baked
+// in correctly during the build. Remove before production if desired.
+console.log('[aws.js] resolved config →', {
+  API_URL:    API_URL    || '⚠ EMPTY — REACT_APP_API_URL not set at build time',
+  TABLE_NAME,
+  AWS_REGION,
+});
+
 if (!API_URL) {
   console.error(
-    '[aws.js] REACT_APP_API_URL is not set. ' +
-    'Copy front-end/.env.example to front-end/.env and fill in your CDK outputs.'
+    '[aws.js] REACT_APP_API_URL is not set.\n' +
+    '  • Local dev:  copy front-end/.env.example → front-end/.env.local and fill values.\n' +
+    '  • Amplify:    add REACT_APP_API_URL in Amplify Console → Environment variables,\n' +
+    '                then trigger a new build (env vars are embedded at build time).'
   );
 }
 

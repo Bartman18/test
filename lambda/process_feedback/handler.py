@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.titan-text-express-v1")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.titan-text-premier-v1:0")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -90,9 +90,11 @@ def get_recommendation(feedback_text: str) -> str:
         error_code = exc.response["Error"]["Code"]
         if error_code == "ResourceNotFoundException":
             logger.error(
-                "Bedrock model '%s' not found or not enabled. "
-                "Go to AWS Console → Amazon Bedrock → Model access and enable this model "
-                "for region %s, then redeploy.",
+                "Bedrock model '%s' not found in region %s. "
+                "This usually means: (1) the model ID is wrong, "
+                "(2) the model has reached end-of-life (e.g. amazon.titan-text-express-v1 is EOL — "
+                "use amazon.titan-text-premier-v1:0 instead), or "
+                "(3) the model is not yet enabled — go to AWS Console → Bedrock → Model access.",
                 BEDROCK_MODEL_ID,
                 os.environ.get("AWS_REGION", "unknown"),
             )

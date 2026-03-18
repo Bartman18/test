@@ -17,7 +17,7 @@ Browser → Cognito (Auth) → API Gateway → Lambda #1 → SNS → SQS → Lam
 | Auth | Amazon Cognito User Pool |
 | REST API | Amazon API Gateway (REST) + Cognito Authorizer |
 | Async ingestion | Lambda #1 → SNS Topic → SQS Queue |
-| AI processing | Lambda #2 → Amazon Bedrock (`amazon.titan-text-express-v1`) |
+| AI processing | Lambda #2 → Amazon Bedrock (`amazon.titan-text-premier-v1:0`) |
 | Storage | Amazon DynamoDB (`Recommendations` table) |
 | Retrieval | Lambda #3 → DynamoDB |
 | IaC | AWS CDK v2 (Python) |

@@ -41,7 +41,7 @@ SQS_EVENT = {
 @pytest.fixture(autouse=True)
 def set_env(monkeypatch):
     monkeypatch.setenv("TABLE_NAME", "Recommendations")
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "eu.anthropic.claude-3-5-haiku-20241022-v1:0")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 
 
 @patch("handler.dynamodb")
@@ -66,7 +66,7 @@ def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     # Bedrock was called
     mock_bedrock.invoke_model.assert_called_once()
     call_kwargs = mock_bedrock.invoke_model.call_args[1]
-    assert call_kwargs["modelId"] == "eu.anthropic.claude-3-5-haiku-20241022-v1:0"
+    assert call_kwargs["modelId"] == "anthropic.claude-3-haiku-20240307-v1:0"
     request_body = json.loads(call_kwargs["body"])
     # Claude Messages API format: messages[0].content holds the prompt
     assert PAYLOAD["feedback_text"] in request_body["messages"][0]["content"]

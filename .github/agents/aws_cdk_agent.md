@@ -11,6 +11,7 @@
   - API Gateway Stack: REST API and Cognito Authorizer. -->
 
 ## Skills Required
+- Proficiency in AWS
 - Proficiency in AWS CDK (Python).
 - Knowledge of AWS services: Cognito, DynamoDB, SNS, SQS, API Gateway.
 - Familiarity with infrastructure-as-code (IaC) principles.

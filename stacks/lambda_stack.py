@@ -66,21 +66,20 @@ class LambdaStack(Stack):
             memory_size=512,
             environment={
                 "TABLE_NAME": table.table_name,
-                "BEDROCK_MODEL_ID": "eu.anthropic.claude-3-5-haiku-20241022-v1:0",
+                "BEDROCK_MODEL_ID": "anthropic.claude-3-haiku-20240307-v1:0",
             },
             description="Consumes SQS, calls Bedrock, saves recommendation to DynamoDB.",
         )
         # Read + write on the Recommendations table
         table.grant_read_write_data(self.process_feedback_fn)
 
-        # Bedrock InvokeModel — grant access to both the foundation model and the
-        # eu cross-region inference profile (required for Anthropic models in eu-central-1)
+        # Bedrock InvokeModel — Claude 3 Haiku is natively available in eu-central-1,
+        # no cross-region inference profile needed.
         self.process_feedback_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0",
-                    f"arn:aws:bedrock:{self.region}:*:inference-profile/eu.anthropic.claude-3-5-haiku-20241022-v1:0",
+                    f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
                 ],
             )
         )

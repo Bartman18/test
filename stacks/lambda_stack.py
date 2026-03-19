@@ -79,7 +79,17 @@ class LambdaStack(Stack):
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2"
+                    f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2",
+                    f"arn:aws:bedrock:{self.region}:*:inference-profile/*",
+                ],
+            )
+        )
+        self.process_feedback_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModelWithResponseStream"],
+                resources=[
+                    f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2",
+                    f"arn:aws:bedrock:{self.region}:*:inference-profile/*",
                 ],
             )
         )

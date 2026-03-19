@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -63,17 +63,13 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
-    # Amazon Nova request format (messages-v1 schema)
+    # Mistral request format
     request_body = json.dumps(
         {
-            "schemaVersion": "messages-v1",
-            "messages": [
-                {"role": "user", "content": [{"text": prompt}]},
-            ],
-            "inferenceConfig": {
-                "max_new_tokens": 512,
-                "temperature": 0.7,
-            },
+            "prompt": prompt,
+            "max_tokens": 512,
+            "temperature": 0.7,
+            "top_p": 0.9,
         }
     )
 

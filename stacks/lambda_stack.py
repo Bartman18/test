@@ -66,20 +66,20 @@ class LambdaStack(Stack):
             memory_size=512,
             environment={
                 "TABLE_NAME": table.table_name,
-                "BEDROCK_MODEL_ID": "amazon.nova-micro-v1:0",
+                "BEDROCK_MODEL_ID": "mistral.mistral-7b-instruct-v0:2",
             },
             description="Consumes SQS, calls Bedrock, saves recommendation to DynamoDB.",
         )
         # Read + write on the Recommendations table
         table.grant_read_write_data(self.process_feedback_fn)
 
-        # Bedrock InvokeModel — Amazon Nova Micro is natively available in eu-central-1,
+        # Bedrock InvokeModel — Mistral 7B Instruct is natively available in eu-central-1,
         # no cross-region inference profile needed.
         self.process_feedback_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.nova-micro-v1:0"
+                    f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2"
                 ],
             )
         )

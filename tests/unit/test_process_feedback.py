@@ -41,19 +41,22 @@ SQS_EVENT = {
 @pytest.fixture(autouse=True)
 def set_env(monkeypatch):
     monkeypatch.setenv("TABLE_NAME", "Recommendations")
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "qwen.qwen3-32b-v1:0")
+    monkeypatch.setenv("BEDROCK_FALLBACK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
 
 
 @patch("handler.dynamodb")
 @patch("handler.bedrock_client")
 def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     """Happy path: Bedrock returns recommendation, item saved to DynamoDB."""
-    # Mock Bedrock response — Mistral format
-    mock_response_body = MagicMock()
-    mock_response_body.read.return_value = json.dumps(
-        {"outputs": [{"text": "Focus on active listening and delegation."}]}
-    )
-    mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
+    # Mock Bedrock response — Converse API format
+    mock_bedrock.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{"text": "Focus on active listening and delegation."}]
+            }
+        }
+    }
 
     # Mock DynamoDB Table
     mock_table = MagicMock()
@@ -64,12 +67,11 @@ def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     lambda_handler(SQS_EVENT, {})
 
     # Bedrock was called
-    mock_bedrock.invoke_model.assert_called_once()
-    call_kwargs = mock_bedrock.invoke_model.call_args[1]
-    assert call_kwargs["modelId"] == "mistral.mistral-7b-instruct-v0:2"
-    request_body = json.loads(call_kwargs["body"])
-    # Mistral format: prompt holds the input
-    assert PAYLOAD["feedback_text"] in request_body["prompt"]
+    mock_bedrock.converse.assert_called_once()
+    call_kwargs = mock_bedrock.converse.call_args[1]
+    assert call_kwargs["modelId"] == "qwen.qwen3-32b-v1:0"
+    messages = call_kwargs["messages"]
+    assert PAYLOAD["feedback_text"] in messages[0]["content"][0]["text"]
 
     # DynamoDB put_item was called with correct keys
     mock_table.put_item.assert_called_once()
@@ -90,14 +92,14 @@ def test_process_feedback_malformed_sqs_body_raises(mock_bedrock, mock_dynamodb)
     with pytest.raises(Exception):
         lambda_handler(bad_event, {})
 
-    mock_bedrock.invoke_model.assert_not_called()
+    mock_bedrock.converse.assert_not_called()
 
 
 @patch("handler.dynamodb")
 @patch("handler.bedrock_client")
 def test_process_feedback_bedrock_failure_raises(mock_bedrock, mock_dynamodb):
     """Bedrock failure re-raises so SQS can retry the message."""
-    mock_bedrock.invoke_model.side_effect = Exception("Bedrock throttled")
+    mock_bedrock.converse.side_effect = Exception("Bedrock throttled")
 
     from handler import lambda_handler
     with pytest.raises(Exception, match="Bedrock throttled"):
@@ -108,11 +110,13 @@ def test_process_feedback_bedrock_failure_raises(mock_bedrock, mock_dynamodb):
 @patch("handler.bedrock_client")
 def test_process_feedback_dynamodb_failure_raises(mock_bedrock, mock_dynamodb):
     """DynamoDB failure re-raises so SQS can retry the message."""
-    mock_response_body = MagicMock()
-    mock_response_body.read.return_value = json.dumps(
-        {"outputs": [{"text": "Some recommendation"}]}
-    )
-    mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
+    mock_bedrock.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{"text": "Some recommendation"}]
+            }
+        }
+    }
 
     mock_table = MagicMock()
     mock_dynamodb.Table.return_value = mock_table

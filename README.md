@@ -17,7 +17,7 @@ Browser → Cognito (Auth) → API Gateway → Lambda #1 → SNS → SQS → Lam
 | Auth | Amazon Cognito User Pool |
 | REST API | Amazon API Gateway (REST) + Cognito Authorizer |
 | Async ingestion | Lambda #1 → SNS Topic → SQS Queue |
-| AI processing | Lambda #2 → Amazon Bedrock (`mistral.mistral-7b-instruct-v0:2`) |
+| AI processing | Lambda #2 → Amazon Bedrock (`qwen.qwen3-32b-v1:0` with fallback to `mistral.mistral-7b-instruct-v0:2`) |
 | Storage | Amazon DynamoDB (`Recommendations` table) |
 | Retrieval | Lambda #3 → DynamoDB |
 | IaC | AWS CDK v2 (Python) |
@@ -85,8 +85,11 @@ pytest tests/integration/ -v
 
 1. Go to **AWS Console → Amazon Bedrock → Model access**
 2. Click **Manage model access**
-3. Enable **Mistral 7B Instruct**
+3. Enable **Qwen3-32B** and **Mistral 7B Instruct**
 4. Save changes
+
+> In `eu-central-1`, if Qwen on-demand is unavailable, configure an inference profile
+> and set `BEDROCK_INFERENCE_PROFILE_ID` on `ProcessFeedbackFunction`.
 
 ### 2. Bootstrap CDK (first time per account/region only)
 

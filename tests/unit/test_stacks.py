@@ -284,7 +284,8 @@ class TestLambdaStack:
             "Environment": {
                 "Variables": assertions.Match.object_like({
                     "TABLE_NAME": assertions.Match.any_value(),
-                    "BEDROCK_MODEL_ID": "mistral.mistral-7b-instruct-v0:2",
+                    "BEDROCK_MODEL_ID": "qwen.qwen3-32b-v1:0",
+                    "BEDROCK_FALLBACK_MODEL_ID": "mistral.mistral-7b-instruct-v0:2",
                 })
             }
         })

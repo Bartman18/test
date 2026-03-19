@@ -66,19 +66,21 @@ class LambdaStack(Stack):
             memory_size=512,
             environment={
                 "TABLE_NAME": table.table_name,
-                "BEDROCK_MODEL_ID": "mistral.mistral-7b-instruct-v0:2",
+                "BEDROCK_MODEL_ID": "qwen.qwen3-32b-v1:0",
+                "BEDROCK_FALLBACK_MODEL_ID": "mistral.mistral-7b-instruct-v0:2",
             },
             description="Consumes SQS, calls Bedrock, saves recommendation to DynamoDB.",
         )
         # Read + write on the Recommendations table
         table.grant_read_write_data(self.process_feedback_fn)
 
-        # Bedrock InvokeModel — Mistral 7B Instruct is natively available in eu-central-1,
-        # no cross-region inference profile needed.
+        # Bedrock invocation permissions for primary model, optional inference profile,
+        # and fallback model.
         self.process_feedback_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
+                    f"arn:aws:bedrock:{self.region}::foundation-model/qwen.qwen3-32b-v1:0",
                     f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2",
                     f"arn:aws:bedrock:{self.region}:*:inference-profile/*",
                 ],
@@ -88,6 +90,7 @@ class LambdaStack(Stack):
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModelWithResponseStream"],
                 resources=[
+                    f"arn:aws:bedrock:{self.region}::foundation-model/qwen.qwen3-32b-v1:0",
                     f"arn:aws:bedrock:{self.region}::foundation-model/mistral.mistral-7b-instruct-v0:2",
                     f"arn:aws:bedrock:{self.region}:*:inference-profile/*",
                 ],

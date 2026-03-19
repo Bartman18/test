@@ -27,13 +27,21 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "mistral.mistral-7b-instruct-v0:2")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "qwen.qwen3-32b-v1:0")
+BEDROCK_INFERENCE_PROFILE_ID = os.environ.get("BEDROCK_INFERENCE_PROFILE_ID")
+BEDROCK_FALLBACK_MODEL_ID = os.environ.get(
+    "BEDROCK_FALLBACK_MODEL_ID",
+    "mistral.mistral-7b-instruct-v0:2",
+)
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
-    "ProcessFeedbackFunction cold start: TABLE_NAME=%s BEDROCK_MODEL_ID=%s",
+    "ProcessFeedbackFunction cold start: TABLE_NAME=%s BEDROCK_MODEL_ID=%s "
+    "BEDROCK_INFERENCE_PROFILE_ID=%s BEDROCK_FALLBACK_MODEL_ID=%s",
     TABLE_NAME,
     BEDROCK_MODEL_ID,
+    BEDROCK_INFERENCE_PROFILE_ID or "<unset>",
+    BEDROCK_FALLBACK_MODEL_ID,
 )
 
 
@@ -63,86 +71,86 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
-    # Mistral request format
-    request_body = json.dumps(
-        {
-            "prompt": prompt,
-            "max_tokens": 512,
-            "temperature": 0.7,
-            "top_p": 0.9,
-        }
-    )
+    def _extract_converse_text(response: dict) -> str:
+        """Extract plain text from Bedrock Converse API response."""
+        output = response.get("output", {})
+        message = output.get("message", {}) if isinstance(output, dict) else {}
+        content = message.get("content", []) if isinstance(message, dict) else []
+        for block in content:
+            if isinstance(block, dict) and "text" in block:
+                return block["text"]
+        raise KeyError(f"Could not extract text from Bedrock Converse response, keys={list(response.keys())}")
 
-    logger.info("Invoking Bedrock model=%s", BEDROCK_MODEL_ID)
-    try:
-        response = bedrock_client.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=request_body,
-        )
-        result = json.loads(response["body"].read())
-        # Flexible parsing: different Bedrock models return different JSON shapes.
-        # Try Anthropic 'content' format first, then fall back to 'results' (Titan),
-        # then to common alternatives. If none match, raise a helpful error.
-        def _extract_text(res: dict) -> str:
-            if not isinstance(res, dict):
-                raise KeyError("Bedrock response is not a JSON object")
+    model_candidates = [BEDROCK_MODEL_ID]
+    if BEDROCK_INFERENCE_PROFILE_ID:
+        model_candidates.append(BEDROCK_INFERENCE_PROFILE_ID)
+    if BEDROCK_FALLBACK_MODEL_ID and BEDROCK_FALLBACK_MODEL_ID not in model_candidates:
+        model_candidates.append(BEDROCK_FALLBACK_MODEL_ID)
 
-            # Anthropic Claude (all versions): { "content": [ { "type": "text", "text": "..." } ] }
-            if "content" in res and isinstance(res["content"], list) and res["content"]:
-                first = res["content"][0]
-                if isinstance(first, dict) and "text" in first:
-                    return first["text"]
+    last_error: Exception | None = None
 
-            # Amazon Nova: { "output": { "message": { "content": [ { "text": "..." } ] } } }
-            output = res.get("output")
-            if isinstance(output, dict):
-                message = output.get("message", {})
-                content = message.get("content", [])
-                if content and isinstance(content[0], dict) and "text" in content[0]:
-                    return content[0]["text"]
-
-            # Mistral: { "outputs": [ { "text": "..." } ] }
-            if "outputs" in res and isinstance(res["outputs"], list) and res["outputs"]:
-                first = res["outputs"][0]
-                if isinstance(first, dict) and "text" in first:
-                    return first["text"]
-
-            # Amazon Titan: { "results": [ { "outputText": "..." } ] }
-            if "results" in res and isinstance(res["results"], list) and res["results"]:
-                first = res["results"][0]
-                if isinstance(first, dict) and "outputText" in first:
-                    return first["outputText"]
-
-            raise KeyError(f"Could not extract text from Bedrock response, keys={list(res.keys())}")
-
-        recommendation: str = _extract_text(result)
-        logger.info("Bedrock response received, length=%d chars", len(recommendation))
-        return recommendation
-    except ClientError as exc:
-        error_code = exc.response["Error"]["Code"]
-        if error_code == "ResourceNotFoundException":
-            logger.error(
-                "Bedrock model '%s' not found in region %s. "
-                "Check: (1) model ID is correct, (2) model is enabled in "
-                "AWS Console → Bedrock → Model access.",
-                BEDROCK_MODEL_ID,
-                os.environ.get("AWS_REGION", "unknown"),
+    for model_id in model_candidates:
+        logger.info("Invoking Bedrock Converse modelId=%s", model_id)
+        try:
+            response = bedrock_client.converse(
+                modelId=model_id,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": prompt}],
+                    }
+                ],
+                inferenceConfig={
+                    "maxTokens": 512,
+                    "temperature": 0.7,
+                    "topP": 0.9,
+                },
             )
-        elif error_code in ("AccessDeniedException", "ValidationException"):
-            logger.error(
-                "Bedrock call rejected for model '%s' (code=%s). "
-                "Check IAM role has bedrock:InvokeModel and model is enabled in Bedrock Model access.",
-                BEDROCK_MODEL_ID,
+            recommendation = _extract_converse_text(response)
+            logger.info(
+                "Bedrock response received from modelId=%s, length=%d chars",
+                model_id,
+                len(recommendation),
+            )
+            return recommendation
+        except ClientError as exc:
+            last_error = exc
+            error_code = exc.response["Error"]["Code"]
+            logger.warning(
+                "Bedrock call failed for modelId=%s (code=%s): %s",
+                model_id,
                 error_code,
+                exc.response["Error"].get("Message", "no error message"),
             )
-        else:
-            logger.exception("Bedrock ClientError for model=%s", BEDROCK_MODEL_ID)
-        raise  # Re-raise → SQS will retry → DLQ after max_receive_count
-    except Exception:
-        logger.exception("Bedrock invocation failed for model=%s", BEDROCK_MODEL_ID)
-        raise  # Re-raise → SQS will retry → DLQ after max_receive_count
+            continue
+        except Exception as exc:
+            last_error = exc
+            logger.exception("Unexpected Bedrock invocation failure for modelId=%s", model_id)
+            continue
+
+    if isinstance(last_error, ClientError):
+        error_code = last_error.response["Error"].get("Code", "Unknown")
+        if error_code in ("ResourceNotFoundException", "ValidationException"):
+            logger.error(
+                "No usable Bedrock target for region=%s. Tried model IDs=%s. "
+                "Likely causes: model not enabled in Bedrock Model access, model unavailable in this region, "
+                "or missing BEDROCK_INFERENCE_PROFILE_ID for cross-region routing.",
+                os.environ.get("AWS_REGION", "unknown"),
+                model_candidates,
+            )
+        elif error_code == "AccessDeniedException":
+            logger.error(
+                "Access denied for Bedrock model invocation. Ensure Lambda role has "
+                "bedrock:InvokeModel on foundation-model and inference-profile resources. "
+                "Tried model IDs=%s",
+                model_candidates,
+            )
+        raise last_error
+
+    if last_error:
+        raise last_error
+
+    raise RuntimeError("Bedrock invocation failed: no model candidates were configured")
 
 
 # ── DynamoDB persistence ─────────────────────────────────────────────────────

@@ -41,17 +41,17 @@ SQS_EVENT = {
 @pytest.fixture(autouse=True)
 def set_env(monkeypatch):
     monkeypatch.setenv("TABLE_NAME", "Recommendations")
-    monkeypatch.setenv("BEDROCK_MODEL_ID", "amazon.titan-text-express-v1")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
 
 
 @patch("handler.dynamodb")
 @patch("handler.bedrock_client")
 def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     """Happy path: Bedrock returns recommendation, item saved to DynamoDB."""
-    # Mock Bedrock response — Amazon Titan Text Express format
+    # Mock Bedrock response — Amazon Nova format
     mock_response_body = MagicMock()
     mock_response_body.read.return_value = json.dumps(
-        {"results": [{"outputText": "Focus on active listening and delegation."}]}
+        {"output": {"message": {"content": [{"text": "Focus on active listening and delegation."}]}}}
     )
     mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
 
@@ -66,10 +66,10 @@ def test_process_feedback_happy_path(mock_bedrock, mock_dynamodb):
     # Bedrock was called
     mock_bedrock.invoke_model.assert_called_once()
     call_kwargs = mock_bedrock.invoke_model.call_args[1]
-    assert call_kwargs["modelId"] == "amazon.titan-text-express-v1"
+    assert call_kwargs["modelId"] == "amazon.nova-micro-v1:0"
     request_body = json.loads(call_kwargs["body"])
-    # Titan format: inputText holds the prompt
-    assert PAYLOAD["feedback_text"] in request_body["inputText"]
+    # Nova messages-v1 format: messages[0].content[0].text holds the prompt
+    assert PAYLOAD["feedback_text"] in request_body["messages"][0]["content"][0]["text"]
 
     # DynamoDB put_item was called with correct keys
     mock_table.put_item.assert_called_once()
@@ -110,7 +110,7 @@ def test_process_feedback_dynamodb_failure_raises(mock_bedrock, mock_dynamodb):
     """DynamoDB failure re-raises so SQS can retry the message."""
     mock_response_body = MagicMock()
     mock_response_body.read.return_value = json.dumps(
-        {"results": [{"outputText": "Some recommendation"}]}
+        {"output": {"message": {"content": [{"text": "Some recommendation"}]}}}
     )
     mock_bedrock.invoke_model.return_value = {"body": mock_response_body}
 

@@ -284,7 +284,7 @@ class TestLambdaStack:
             "Environment": {
                 "Variables": assertions.Match.object_like({
                     "TABLE_NAME": assertions.Match.any_value(),
-                    "BEDROCK_MODEL_ID": "anthropic.claude-3-haiku-20240307-v1:0",
+                    "BEDROCK_MODEL_ID": "amazon.titan-text-express-v1",
                 })
             }
         })

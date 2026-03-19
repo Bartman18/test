@@ -27,7 +27,7 @@ dynamodb = boto3.resource("dynamodb")
 bedrock_client = boto3.client("bedrock-runtime")
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.titan-text-express-v1")
 
 # Log resolved config on cold start — visible in CloudWatch Logs
 logger.info(
@@ -63,15 +63,14 @@ def get_recommendation(feedback_text: str) -> str:
         "3. Relevant training or certifications to consider\n"
     )
 
-    # Anthropic Messages API format — used by all Claude 3/4 models on Bedrock
+    # Amazon Titan Text Express request format
     request_body = json.dumps(
         {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 512,
-            "temperature": 0.7,
-            "messages": [
-                {"role": "user", "content": prompt},
-            ],
+            "inputText": prompt,
+            "textGenerationConfig": {
+                "maxTokenCount": 512,
+                "temperature": 0.7,
+            },
         }
     )
 

@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
 
 env:
-# ${{ secrets.AWS_REGION }}
-  AWS_REGION: 'eu-central-1'
-  CDK_DEFAULT_REGION: 'eu-central-1'
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  CDK_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
   CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
   NODE_VERSION: '18'
   PYTHON_VERSION: '3.11'
@@ -39,7 +38,7 @@ jobs:
 
       - name: Run unit tests with coverage
         run: |
-          pytest --cov=lambda --cov-report=xml --cov-report=term-missing -v
+          pytest --cov=app/lambda --cov-report=xml --cov-report=term-missing -v
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -86,10 +85,10 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: CDK Synth (validate app)
-        run: cdk synth
+        run: cdk synth "FeedbackApp/**"
 
       - name: CDK Diff (show infrastructure changes)
-        run: cdk diff --all
+        run: cdk diff "FeedbackApp/**"
 
   # ─────────────────────────────────────────────
   # JOB 3: Deploy all CDK stacks
@@ -133,21 +132,14 @@ jobs:
       - name: CDK Bootstrap (if not already bootstrapped)
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ secrets.AWS_REGION }}
 
-      - name: Deploy CognitoStack
-        run: cdk deploy CognitoStack --require-approval never
+      - name: Deploy all stacks (FeedbackApp stage)
+        run: cdk deploy "FeedbackApp/**" --require-approval never
 
-      - name: Deploy DatabaseStack
-        run: cdk deploy DatabaseStack --require-approval never
-
-      - name: Deploy MessagingStack
-        run: cdk deploy MessagingStack --require-approval never
-
-      - name: Deploy LambdaStack
-        run: cdk deploy LambdaStack --require-approval never
-
-      - name: Deploy ApiStack
-        run: cdk deploy ApiStack --require-approval never
-
-      - name: Print deployed API URL
+      - name: Print CloudFormation outputs
         run: |
-          echo "Deployment complete. Check CloudFormation outputs for API Gateway URL."
+          echo "=== Cognito outputs ==="
+          aws cloudformation describe-stacks --stack-name FeedbackApp-Cognito \
+            --query 'Stacks[0].Outputs' --output table
+          echo "=== API outputs ==="
+          aws cloudformation describe-stacks --stack-name FeedbackApp-Api \
+            --query 'Stacks[0].Outputs' --output table

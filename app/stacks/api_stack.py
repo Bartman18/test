@@ -11,20 +11,15 @@ from constructs import Construct
 
 class ApiStack(Stack):
     """
-    Phase 6 — AWS CDK Agent
     Creates the REST API Gateway with Cognito authorizer and Lambda integrations.
+
     Endpoints:
-      POST /feedback       → PostFeedbackFunction (returns 202)
+      POST /feedback       → PostFeedbackFunction  (returns 202)
       GET  /recommendation → GetRecommendationFunction (returns 200/404)
+
     Both endpoints require a valid Cognito JWT in the Authorization header.
-
-    Initialisation is intentionally split into two phases so that app.py can
-    declare the API Gateway first (the public entry-point) and wire the Cognito
-    authorizer and Lambda routes afterwards:
-
-        api_stack     = ApiStack(...)                         # 1. API Gateway
-        cognito_stack = CognitoStack(...)                     # 2. Cognito pool
-        api_stack.configure(user_pool, post_fn, get_fn)      # 3. connect authorizer
+    Resources are created in __init__; routes and the Cognito authorizer are
+    wired in by calling configure() — done once inside FeedbackAppStage.
     """
 
     def __init__(

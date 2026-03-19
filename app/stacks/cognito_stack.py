@@ -11,9 +11,12 @@ from constructs import Construct
 
 class CognitoStack(Stack):
     """
-    Phase 2 — AWS CDK Agent
-    Creates the Cognito User Pool and App Client used for authentication.
-    Exposes user_pool and app_client as public properties for dependent stacks.
+    Creates the Cognito User Pool, App Client, and Identity Pool.
+
+    Exposes user_pool, app_client, identity_pool, and authenticated_role as
+    public properties for dependent stacks.
+    Call configure_grants(table) after DatabaseStack is created to grant the
+    Identity Pool authenticated role read access to DynamoDB.
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:

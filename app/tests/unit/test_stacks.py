@@ -60,7 +60,7 @@ def _all_stacks(app: cdk.App):
         queue=messaging.queue,
     )
 
-# 4. Connect Cognito authorizer + all routes to API Gateway
+    # 4. Connect Cognito authorizer + all routes to API Gateway
     api.configure(
         user_pool=cognito.user_pool,
         post_feedback_fn=lambdas.post_feedback_fn,

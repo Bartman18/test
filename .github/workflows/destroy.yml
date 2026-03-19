@@ -79,23 +79,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: CDK Synth (validate before destroy)
-        run: cdk synth
+      - name: Confirm stacks exist before destroy
+        run: cdk list
 
-      - name: Destroy ApiStack
-        run: cdk destroy ApiStack --force
-
-      - name: Destroy LambdaStack
-        run: cdk destroy LambdaStack --force
-
-      - name: Destroy MessagingStack
-        run: cdk destroy MessagingStack --force
-
-      - name: Destroy DatabaseStack
-        run: cdk destroy DatabaseStack --force
-
-      - name: Destroy CognitoStack
-        run: cdk destroy CognitoStack --force
+      - name: Destroy all stacks (FeedbackApp stage)
+        run: cdk destroy "FeedbackApp/**" --force
 
       - name: Confirm teardown complete
         run: |

@@ -1,4 +1,4 @@
-import aws_cdk as cdk
+import os
 from aws_cdk import (
     Stack,
     Duration,
@@ -32,6 +32,10 @@ class LambdaStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # Resolve lambda code paths relative to this file so `cdk deploy` works
+        # regardless of the working directory (project root vs app/).
+        _lambda_dir = os.path.join(os.path.dirname(__file__), "..", "lambda")
+
         # ── Common Lambda config ─────────────────────────────────────────────
         common_props = dict(
             runtime=aws_lambda.Runtime.PYTHON_3_11,
@@ -45,7 +49,7 @@ class LambdaStack(Stack):
             self,
             "PostFeedbackFunction",
             **common_props,
-            code=aws_lambda.Code.from_asset("lambda/post_feedback"),
+            code=aws_lambda.Code.from_asset(os.path.join(_lambda_dir, "post_feedback")),
             timeout=Duration.seconds(30),
             memory_size=256,
             environment={
@@ -61,7 +65,7 @@ class LambdaStack(Stack):
             self,
             "ProcessFeedbackFunction",
             **common_props,
-            code=aws_lambda.Code.from_asset("lambda/process_feedback"),
+            code=aws_lambda.Code.from_asset(os.path.join(_lambda_dir, "process_feedback")),
             timeout=Duration.minutes(5),
             memory_size=512,
             environment={
@@ -107,7 +111,7 @@ class LambdaStack(Stack):
             self,
             "GetRecommendationFunction",
             **common_props,
-            code=aws_lambda.Code.from_asset("lambda/get_recommendation"),
+            code=aws_lambda.Code.from_asset(os.path.join(_lambda_dir, "get_recommendation")),
             timeout=Duration.seconds(30),
             memory_size=256,
             environment={

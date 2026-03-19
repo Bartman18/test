@@ -9,33 +9,30 @@ A serverless application where authenticated users submit feedback received from
 ## Architecture Summary
 
 ```
-User (Browser)
-  │
-  ├──► AWS Amplify (React Front-End)
-  │         │
-  │         ├── Auth: Amazon Cognito User Pool
-  │         │
-  │         └── API calls (JWT in Authorization header)
-  │                   │
-  │              API Gateway (REST)
-  │                   │  Cognito Authorizer (validates JWT)
-  │                   │
-  │         ┌─────────┴──────────┐
-  │     POST /feedback       GET /recommendation
-  │         │                    │
-  │    Lambda #1            Lambda #3
-  │  (publish to SNS)    (read from DynamoDB)
-  │         │
-  │        SNS
-  │         │  (fan-out)
-  │        SQS  (buffer / retry)
-  │         │
-  │    Lambda #2
-  │  (consume SQS →
-  │   call Bedrock →
-  │   save to DynamoDB)
-  │
-  └──► DynamoDB  (stores recommendations)
+  User
+   │  provide feedback
+   ▼
+AWS Amplify (Front-End)
+   │                          ┌──────────────────────────────────┐
+   │  trigger evaluation      │  Authorizer ──────────────► Cognito│
+   ├─────────────────────► API Gateway                             │
+   │                          │  (validates JWT)                   └──┘
+   │                          │
+   │                       Lambda #1 — PostFeedbackFunction
+   │                          │  create message
+   │                          ▼
+   │                         SNS FeedbackTopic
+   │                          │  subscribe
+   │                         SQS FeedbackQueue
+   │                          │  consume
+   │                       Lambda #2 — ProcessFeedbackFunction
+   │                          │  ask GenAI        │ save recommendation
+   │                          ▼                   ▼
+   │                    Amazon Bedrock         DynamoDB — Recommendations
+   │                                              ▲
+   │  read current recommendations               │
+   └──────────────────────────────────────────────┘
+   (via Cognito Identity Pool → IAM temp credentials → DynamoDB)
 ```
 
 ---
@@ -106,9 +103,21 @@ feedback-app/
 
 ### Phase 2 — Cognito Stack (`cognito_stack.py`)
 - [x] Create Cognito **User Pool** with email sign-up/sign-in
+  - `self_sign_up_enabled=True`, `sign_in_aliases: email`, `auto_verify: email`
+  - Password policy: min 8 chars, uppercase + digits required, symbols not required
+  - `account_recovery=EMAIL_ONLY`
+  - `removal_policy=DESTROY` (dev/test)
 - [x] Create **App Client** (no client secret — for Amplify SPA use)
-- [x] Enable self-service sign-up with email verification
-- [x] Export `user_pool_id` and `app_client_id` as CDK outputs — `CfnOutput: FeedbackUserPoolId`, `FeedbackUserPoolClientId`
+  - `auth_flows: user_password=True, user_srp=True`
+  - `prevent_user_existence_errors=True`
+- [x] Create **Cognito Identity Pool** (`allow_unauthenticated_identities=False`)
+  - Linked to User Pool + App Client
+  - IAM **authenticated role** created (`IdentityPoolAuthenticatedRole`) with `sts:AssumeRoleWithWebIdentity`
+  - Role attachment via `CfnIdentityPoolRoleAttachment`
+- [x] `configure_grants(table)` method (called after `DatabaseStack` in `app.py`):
+  - Grants `dynamodb:Read*` to the Identity Pool authenticated role via `table.grant_read_data(authenticated_role)`
+  - Enables Amplify to read DynamoDB directly using short-lived IAM credentials
+- [x] CDK Outputs: `FeedbackUserPoolId`, `FeedbackUserPoolClientId`, `FeedbackIdentityPoolId`
 
 ### Phase 3 — DynamoDB Stack (`database_stack.py`)
 - [x] Create `Recommendations` table
@@ -120,10 +129,11 @@ feedback-app/
 ### Phase 4 — Messaging Stack (`messaging_stack.py`)
 - [x] Create **SNS Topic**: `FeedbackTopic`
 - [x] Create **SQS Queue**: `FeedbackQueue`
-  - Visibility timeout = 360s (≥ Lambda #2 timeout 300s × 6)
-  - Dead Letter Queue (DLQ) after 3 receive attempts, retention 14 days
+  - Visibility timeout = **1800s (30 min)** — must be ≥ 6× Lambda #2 timeout (5 min × 6 = 30 min)
+  - Dead Letter Queue (`FeedbackDLQ`) after 3 receive attempts, retention 14 days
+  - `raw_message_delivery=False` (preserves SNS envelope for Lambda #2 unwrapping)
 - [x] Subscribe `FeedbackQueue` to `FeedbackTopic`
-- [x] Grant SNS the permission to send messages to SQS
+- [x] CDK Outputs: `FeedbackTopicArn`, `FeedbackQueueUrl`, `FeedbackDLQUrl`
 
 ### Phase 5 — Lambda Stack (`lambda_stack.py`)
 
@@ -140,63 +150,79 @@ feedback-app/
 - **Trigger**: SQS Event Source Mapping from `FeedbackQueue` (batch_size=1)
 - **Responsibilities**:
   1. Parse the SNS-wrapped SQS message body
-  2. Call **Amazon Bedrock** (`bedrock-runtime:InvokeModel`) with feedback text
-  3. Parse model response (recommendation text)
-  4. Write `{ user_id, feedback_id, recommendation, timestamp }` to DynamoDB
-- **IAM**: `dynamodb:ReadWriteData` (via `table.grant_read_write_data`), `bedrock:InvokeModel` (PolicyStatement scoped to model ARN)
-- **Environment Variables**: `TABLE_NAME`, `BEDROCK_MODEL_ID`
+  2. Call **Amazon Bedrock Converse API** (`bedrock-runtime:Converse`) with feedback text
+  3. Resolve text from unified Converse response (`output.message.content[0].text`)
+  4. Write `{ user_id, feedback_id, feedback_text, recommendation, timestamp }` to DynamoDB
+- **Bedrock model resolution** (waterfall order):
+  1. `BEDROCK_MODEL_ID` (default: `qwen.qwen3-32b-v1:0`)
+  2. `BEDROCK_INFERENCE_PROFILE_ID` (optional, for cross-region routing in eu-central-1)
+  3. `BEDROCK_FALLBACK_MODEL_ID` (default: `mistral.mistral-7b-instruct-v0:2`)
+- **Timeout**: 5 minutes | **Memory**: 512 MB
+- **IAM**:
+  - `dynamodb:Read/WriteData` (via `table.grant_read_write_data`)
+  - `bedrock:InvokeModel` + `bedrock:InvokeModelWithResponseStream` scoped to:
+    - `arn:aws:bedrock:{region}::foundation-model/qwen.qwen3-32b-v1:0`
+    - `arn:aws:bedrock:{region}::foundation-model/mistral.mistral-7b-instruct-v0:2`
+    - `arn:aws:bedrock:{region}:*:inference-profile/*`
+- **Environment Variables**: `TABLE_NAME`, `BEDROCK_MODEL_ID`, `BEDROCK_FALLBACK_MODEL_ID`
 
 #### Lambda #3 — `GetRecommendationFunction` ✅
-- **Trigger**: API Gateway (GET /recommendation)
+- **Trigger**: API Gateway (`GET /recommendation`)
 - **Responsibilities**:
-  1. Extract `user_id` from authorizer context
-  2. Optionally accept `feedback_id` as query string parameter
-  3. Query DynamoDB for recommendations belonging to that user
-  4. Return HTTP **200** with recommendation items (or 404 if none found)
-- **IAM**: `dynamodb:ReadData` (via `table.grant_read_data`)
+  1. Extract `user_id` from Cognito authorizer claims (`sub` field of JWT — no user input needed)
+  2. Optionally accept `?feedback_id=<uuid>` as query string to retrieve a single item
+  3. Without `feedback_id`: DynamoDB `Query` all recommendations for this `user_id`
+  4. Return HTTP **200** with results, or **404** if nothing found
+- **IAM**: `dynamodb:Read*` (via `table.grant_read_data`)
+- **Security**: user can only ever see their own recommendations — `user_id` comes from the verified JWT, not from the request body
 
 ### Phase 6 — API Gateway Stack (`api_stack.py`)
 - [x] Create **REST API** in API Gateway (`FeedbackService`, stage: `prod`)
 - [x] Create **Cognito User Pool Authorizer** attached to the User Pool
 - [x] Define resources and methods:
-  - `POST /feedback` → Lambda #1 integration, Authorizer required
-  - `GET /recommendation` → Lambda #3 integration, Authorizer required
+  - `POST /feedback` → Lambda #1, Authorizer required
+  - `GET /recommendation` → Lambda #3, Authorizer required (user scoped by JWT `sub`)
 - [x] Enable **CORS** on both endpoints (for Amplify front-end)
-- [x] Deploy to stage `prod` with X-Ray tracing enabled
-- [x] Export API URL as CDK outputs:
-  - `CfnOutput: FeedbackApiUrl` — base URL (e.g. `https://<id>.execute-api.<region>.amazonaws.com/prod/`)
-  - `CfnOutput: PostFeedbackEndpoint` — `{ApiUrl}feedback`
-  - `CfnOutput: GetRecommendationEndpoint` — `{ApiUrl}recommendation`
-
-> ⚠️ **After deployment**: copy `FeedbackApiUrl` from CloudFormation outputs and set it in `front-end/src/aws-exports.js` as the `API.endpoint` value for Amplify.
+- [x] Deploy to stage `prod` with X-Ray tracing and INFO logging enabled
+- [x] CDK Outputs: `FeedbackApiUrl`, `PostFeedbackEndpoint`, `GetRecommendationEndpoint`
 
 ### Phase 7 — Front-End (Amplify + React) ⏳ NOT STARTED
 - [ ] Initialize React app (`npx create-react-app front-end`)
 - [ ] Install Amplify libraries (`@aws-amplify/ui-react`, `aws-amplify`)
 - [ ] Configure `Amplify.configure()` in `src/index.js` using CDK outputs:
   ```js
-  Auth: { userPoolId: "<FeedbackUserPoolId>", userPoolWebClientId: "<FeedbackUserPoolClientId>" },
-  API:  { endpoint: "<FeedbackApiUrl>" }
+  Auth: {
+    userPoolId: "<FeedbackUserPoolId>",
+    userPoolWebClientId: "<FeedbackUserPoolClientId>",
+    region: "eu-central-1",
+  },
+  API: { endpoint: "<FeedbackApiUrl>" }
   ```
 - [ ] Build components:
   - `<Authenticator />` from Amplify UI for login/register
-  - `FeedbackForm` — calls `POST /feedback`, shows `feedback_id` confirmation, polls for result
-  - `Recommendation` — calls `GET /recommendation`, displays AI suggestion
+  - `FeedbackForm` — calls `POST /feedback` via API Gateway with JWT in `Authorization` header, shows `feedback_id` confirmation
+  - `Recommendation` — calls `GET /recommendation` via API Gateway with JWT; `user_id` is extracted server-side from the JWT `sub` claim by Lambda #3 — no user ID needed in the request
 - [ ] Deploy via Amplify Console (connect to Git repo)
 
 ### Phase 8 — Amazon Bedrock Integration (inside Lambda #2) ✅
-- [x] Model: `mistral.mistral-7b-instruct-v0:2` (set via `BEDROCK_MODEL_ID` env var)
+- [x] Primary model: `qwen.qwen3-32b-v1:0` (set via `BEDROCK_MODEL_ID` env var)
+- [x] Fallback model: `mistral.mistral-7b-instruct-v0:2` (set via `BEDROCK_FALLBACK_MODEL_ID`)
+- [x] Optional inference profile: `BEDROCK_INFERENCE_PROFILE_ID` (for cross-region routing, e.g. `eu-central-1`)
+- [x] Uses **Bedrock Converse API** (`bedrock_client.converse()`) — provider-agnostic request/response format
+  - Uniform response extraction: `output.message.content[0].text`
+- [x] Waterfall retry: primary model → inference profile → fallback model; raises last error if all fail
 - [x] Construct career-coach prompt with `feedback_text` injected
-- [x] Parse `result["outputs"][0]["text"]` from Mistral response
-- [x] Handle Bedrock throttling — exceptions re-raise to trigger SQS retry → DLQ after 3 attempts
-- [x] IAM `bedrock:InvokeModel` granted via `PolicyStatement` scoped to:
-  `arn:aws:bedrock:{region}::foundation-model/mistral.mistral-7b-instruct-v0:2`
+- [x] Handle Bedrock failures — exceptions re-raise to trigger SQS retry → DLQ after 3 attempts
+- [x] IAM `bedrock:InvokeModel` + `bedrock:InvokeModelWithResponseStream` granted via `PolicyStatement` scoped to:
+  - `arn:aws:bedrock:{region}::foundation-model/qwen.qwen3-32b-v1:0`
+  - `arn:aws:bedrock:{region}::foundation-model/mistral.mistral-7b-instruct-v0:2`
+  - `arn:aws:bedrock:{region}:*:inference-profile/*`
 
 > 🔴 **MANUAL STEP REQUIRED — will fail silently without this:**
 > Go to **AWS Console → Amazon Bedrock → Model access** and request/enable access to
-> `Mistral 7B Instruct`. CDK cannot automate this step.
-> If you change `BEDROCK_MODEL_ID` to a different model (e.g. Claude), you must also update
-> the IAM resource ARN in `stacks/lambda_stack.py` to match the new model ID.
+> **Qwen3-32B** and **Mistral 7B Instruct**. CDK cannot automate this step.
+> In `eu-central-1`, if Qwen3-32B on-demand is unavailable, configure an inference profile
+> and set `BEDROCK_INFERENCE_PROFILE_ID` on `ProcessFeedbackFunction` (no code change needed).
 
 ### Phase 9 — Testing
 - [x] Unit tests for each Lambda handler using `unittest.mock` (`@patch`)
@@ -268,11 +294,14 @@ LambdaStack + CognitoStack + MessagingStack
 
 ## Environment Variables per Lambda
 
-| Lambda | Variable | Source |
-|---|---|---|
-| `PostFeedbackFunction` | `SNS_TOPIC_ARN` | MessagingStack output |
-| `ProcessFeedbackFunction` | `TABLE_NAME`, `BEDROCK_MODEL_ID` | DatabaseStack output + hardcoded |
-| `GetRecommendationFunction` | `TABLE_NAME` | DatabaseStack output |
+| Lambda | Variable | Source | Default |
+|---|---|---|---|
+| `PostFeedbackFunction` | `SNS_TOPIC_ARN` | MessagingStack output | — |
+| `ProcessFeedbackFunction` | `TABLE_NAME` | DatabaseStack output | — |
+| `ProcessFeedbackFunction` | `BEDROCK_MODEL_ID` | Hardcoded in CDK | `qwen.qwen3-32b-v1:0` |
+| `ProcessFeedbackFunction` | `BEDROCK_FALLBACK_MODEL_ID` | Hardcoded in CDK | `mistral.mistral-7b-instruct-v0:2` |
+| `ProcessFeedbackFunction` | `BEDROCK_INFERENCE_PROFILE_ID` | Optional manual override | *(not set)* |
+| `GetRecommendationFunction` | `TABLE_NAME` | DatabaseStack output | — |
 
 ---
 

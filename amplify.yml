@@ -3,9 +3,14 @@
 # In Amplify Console → App settings → Build settings, point App root to: front-end
 #
 # Required environment variables (set in Amplify Console → Environment variables):
-#   REACT_APP_USER_POOL_ID        → from CDK output: CognitoStack > UserPoolId
-#   REACT_APP_USER_POOL_CLIENT_ID → from CDK output: CognitoStack > UserPoolClientId
-#   REACT_APP_API_URL             → from CDK output: ApiStack > ApiUrl  (no trailing slash)
+#   REACT_APP_USER_POOL_ID        → from CDK output: FeedbackApp-Cognito › UserPoolId
+#   REACT_APP_USER_POOL_CLIENT_ID → from CDK output: FeedbackApp-Cognito › UserPoolClientId
+#   REACT_APP_IDENTITY_POOL_ID    → from CDK output: FeedbackApp-Cognito › IdentityPoolId
+#   REACT_APP_API_URL             → from CDK output: FeedbackApp-Api    › ApiUrl  (no trailing slash)
+#
+# Get all outputs after deploy with:
+#   aws cloudformation describe-stacks --stack-name FeedbackApp-Cognito --profile backend-test
+#   aws cloudformation describe-stacks --stack-name FeedbackApp-Api     --profile backend-test
 
 version: 1
 applications:

@@ -24,7 +24,7 @@ const formFields = {
     username: { label: 'Email', placeholder: 'your@email.com' },
   },
   signUp: {
-    username: { label: 'Email', placeholder: 'your@email.com', order: 1 },
+    email: { label: 'Email', placeholder: 'your@email.com', order: 1 },
     password: { label: 'Password', order: 2 },
     confirm_password: { label: 'Confirm password', order: 3 },
   },
@@ -32,7 +32,7 @@ const formFields = {
 
 export default function App() {
   return (
-    <Authenticator components={components} formFields={formFields}>
+    <Authenticator components={components} formFields={formFields} loginMechanisms={['email']}>
       {({ signOut, user }) => (
         <BrowserRouter>
           <div className="app">

@@ -67,9 +67,6 @@ def _all_stacks(app: cdk.App):
         get_recommendation_fn=lambdas.get_recommendation_fn,
     )
 
-    # 5. Grant Identity Pool authenticated role read-only access to DynamoDB
-    cognito.configure_grants(table=database.table)
-
     return cognito, database, messaging, lambdas, api
 
 

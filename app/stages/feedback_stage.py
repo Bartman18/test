@@ -11,7 +11,7 @@ Deploy everything at once (from project root):
 Individual stacks inside the stage:
     FeedbackApp/Database   — DynamoDB Recommendations table
     FeedbackApp/Messaging  — SNS topic, SQS queue, DLQ
-    FeedbackApp/Cognito    — User Pool, App Client, Identity Pool
+    FeedbackApp/Cognito    — User Pool, App Client, Identity Pool (no DynamoDB grant)
     FeedbackApp/Lambda     — 3 Lambda functions + IAM grants + SQS event source
     FeedbackApp/Api        — API Gateway REST API + Cognito authorizer + routes
 """
@@ -56,9 +56,6 @@ class FeedbackAppStage(cdk.Stage):
             post_feedback_fn=lambdas.post_feedback_fn,
             get_recommendation_fn=lambdas.get_recommendation_fn,
         )
-
-        # ── Identity Pool → DynamoDB read grant ──────────────────────────────
-        cognito.configure_grants(table=database.table)
 
         # ── Explicit deployment order ─────────────────────────────────────────
         # CDK infers most ordering from cross-stack refs but declaring it

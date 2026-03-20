@@ -15,8 +15,9 @@ class CognitoStack(Stack):
 
     Exposes user_pool, app_client, identity_pool, and authenticated_role as
     public properties for dependent stacks.
-    Call configure_grants(table) after DatabaseStack is created to grant the
-    Identity Pool authenticated role read access to DynamoDB.
+    The Identity Pool issues temporary AWS credentials to authenticated users
+    but does NOT grant any DynamoDB permissions — all database access is
+    routed through API Gateway → Lambda.
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
@@ -115,19 +116,4 @@ class CognitoStack(Stack):
             export_name="FeedbackIdentityPoolId",
         )
 
-    def configure_grants(self, table) -> None:
-        """Grant Identity Pool authenticated role read-only access to DynamoDB.
 
-        Called after DatabaseStack so app.py reads in dependency order:
-          1. API Gateway      (ApiStack.__init__)
-          2. Cognito          (CognitoStack.__init__ — User Pool + Identity Pool)
-          3. DynamoDB         (DatabaseStack)
-          4. Messaging + Lambda
-          5. api_stack.configure()        — POST /feedback + Cognito authorizer
-          6. cognito_stack.configure_grants() — DynamoDB read grant for Amplify
-        """
-        # Amplify exchanges the Cognito JWT for short-lived AWS credentials via
-        # the Identity Pool and uses them to query DynamoDB directly from the
-        # browser — this is the "read current recommendations" branch in the
-        # architecture diagram.
-        table.grant_read_data(self.authenticated_role)

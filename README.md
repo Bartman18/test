@@ -37,8 +37,6 @@ A serverless AWS application where authenticated users submit manager feedback a
           │                    │  (user_id from JWT sub)
           │               Lambda #3 — GetRecommendationFunction ────────┘
           │               (Query/GetItem by user_id → 200/404)
-          │
-          └─ read recommendations (Identity Pool → IAM credentials → DynamoDB)
 ```
 
 | Layer | Service |
@@ -50,7 +48,6 @@ A serverless AWS application where authenticated users submit manager feedback a
 | AI processing | Lambda #2 → Bedrock Converse API (primary: `qwen.qwen3-32b-v1:0`, fallback: `mistral.mistral-7b-instruct-v0:2`) |
 | Storage | Amazon DynamoDB `Recommendations` table (PAY_PER_REQUEST, PITR, TTL) |
 | API read path | `GET /recommendation` → Lambda #3 → DynamoDB (user scoped by JWT `sub`) |
-| Direct read path | Amplify → Cognito Identity Pool → IAM credentials → DynamoDB |
 | Dead-letter handling | SQS DLQ (`FeedbackDLQ`, max 3 retries, 14-day retention) |
 | Observability | AWS X-Ray tracing (all Lambdas + API Gateway), CloudWatch Logs (1-week retention) |
 | IaC | AWS CDK v2 (Python) |
@@ -159,7 +156,7 @@ After a successful deploy, copy these values:
 | `FeedbackApiUrl` | API Gateway base URL | Front-end `Amplify.configure()` — write path |
 | `FeedbackUserPoolId` | Cognito User Pool ID | Front-end auth config |
 | `FeedbackUserPoolClientId` | Cognito App Client ID | Front-end auth config |
-| `FeedbackIdentityPoolId` | Cognito Identity Pool ID | Amplify direct DynamoDB reads (read path) |
+| `FeedbackIdentityPoolId` | Cognito Identity Pool ID | Amplify auth config (no DynamoDB access) |
 | `PostFeedbackEndpoint` | Full URL for `POST /feedback` | Quick testing / Postman |
 | `GetRecommendationEndpoint` | Full URL for `GET /recommendation` | Quick testing / Postman *(extra endpoint)* |
 

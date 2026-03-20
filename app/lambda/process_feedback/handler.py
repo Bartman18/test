@@ -62,13 +62,11 @@ def get_recommendation(feedback_text: str) -> str:
     Re-raises on any exception to allow SQS retry.
     """
     prompt = (
-        "You are a professional career coach.\n"
-        "A person received the following feedback from their manager:\n\n"
-        f'"{feedback_text}"\n\n'
-        "Please provide:\n"
-        "1. Key areas for improvement\n"
-        "2. Specific actionable steps\n"
-        "3. Relevant training or certifications to consider\n"
+        "You are a career coach. Read the manager feedback below and reply with "
+        "2-3 concise sentences that tell the person exactly what to improve and one "
+        "concrete action they can take immediately. Do not use bullet points, headers, "
+        "or numbered lists — plain sentences only.\n\n"
+        f'Feedback: "{feedback_text}"'
     )
 
     def _extract_converse_text(response: dict) -> str:
@@ -101,7 +99,7 @@ def get_recommendation(feedback_text: str) -> str:
                     }
                 ],
                 inferenceConfig={
-                    "maxTokens": 512,
+                    "maxTokens": 120,
                     "temperature": 0.7,
                     "topP": 0.9,
                 },
